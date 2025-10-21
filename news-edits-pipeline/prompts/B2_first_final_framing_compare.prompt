@@ -1,0 +1,56 @@
+Assess framing differences between the first and final versions. Please help me compare the initial and final versions to identify framing differences.
+<rules>
+Consider descriptive focus, causal narratives, and featured actors.
+- Use lede as the first paragraph or first ~80 words if paragraph unavailable.
+- `title_sources_added/removed` refer to named entities appearing or disappearing from the headline.
+- Keep `one_sentence_diff` concise and analytic.
+- Report `confidence` on a 1–5 scale (1 = very low, 5 = very high).
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+lede_change_type.minor_copy: The lede wording shifts slightly without altering meaning or facts.
+lede_change_type.new_facts: The lede introduces substantive new information not previously present.
+lede_change_type.reframing: The lede presents the story with a different emphasis, angle, or framing.
+lede_change_type.unclear: The available text does not allow a confident classification of the lede change.
+</labels>
+
+<examples>
+Example 1 Input:
+first_version_title: Storm batters coast, leaves town without power
+first_version_lede: Emergency crews counted 50 downed lines overnight as residents sheltered in schools.
+
+final_version_title: Storm batters coast as FEMA teams arrive with aid
+final_version_lede: Emergency crews counted 50 downed lines overnight, and FEMA teams began door-to-door wellness checks Tuesday morning.
+
+Example 1 Output:
+{
+  "lede_changed": true,
+  "lede_change_type": "reframing",
+  "title_sources_added": ["FEMA"],
+  "title_sources_removed": [],
+  "angle_changed": true,
+  "one_sentence_diff": "Final framing shifts from tallying storm damage to emphasizing incoming federal assistance.",
+  "confidence": 4
+}
+</examples>
+
+<json_output>
+{
+  "lede_changed": true|false,
+  "lede_change_type": "minor_copy|new_facts|reframing|unclear",
+  "title_sources_added": ["..."],
+  "title_sources_removed": ["..."],
+  "angle_changed": true|false,
+  "one_sentence_diff": "...",
+  "confidence": 1
+}
+</json_output>
+
+<article>
+first_version_title: {{title_v0}}
+first_version_lede: {{lede_v0}}
+
+final_version_title: {{title_vf}}
+final_version_lede: {{lede_vf}}
+</article>

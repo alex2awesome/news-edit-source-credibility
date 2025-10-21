@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "has_correction": {
+      "type": "boolean"
+    },
+    "correction_affects": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "source_identity",
+          "claim_content",
+          "numbers",
+          "typo",
+          "none"
+        ]
+      }
+    },
+    "correction_text": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5
+    }
+  },
+  "required": [
+    "has_correction",
+    "correction_affects",
+    "correction_text",
+    "confidence"
+  ]
+}

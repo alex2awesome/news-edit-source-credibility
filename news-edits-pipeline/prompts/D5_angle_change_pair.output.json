@@ -1,0 +1,46 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "angle_changed": {
+      "type": "boolean"
+    },
+    "old_angle": {
+      "type": "string"
+    },
+    "new_angle": {
+      "type": "string"
+    },
+    "change_type": {
+      "type": "string",
+      "enum": [
+        "who",
+        "what",
+        "why",
+        "responsibility",
+        "impact",
+        "blame",
+        "unclear"
+      ]
+    },
+    "evidence_snippets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "confidence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5
+    }
+  },
+  "required": [
+    "angle_changed",
+    "old_angle",
+    "new_angle",
+    "change_type",
+    "evidence_snippets",
+    "confidence"
+  ]
+}

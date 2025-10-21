@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "is_live_blog": {
+      "type": "boolean"
+    },
+    "confidence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5
+    },
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "is_live_blog",
+    "confidence",
+    "signals"
+  ]
+}

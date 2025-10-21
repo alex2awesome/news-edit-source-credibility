@@ -1,0 +1,40 @@
+Examine recurring frame cues and how they evolve. Please help me examine how framing cues change between these article versions.
+<rules>
+- Use the same cue vocabulary as the protest frame (law-and-order, violence, political demands, human impact, etc.).
+- Consult `prev_protest_cues` and `curr_protest_cues` (JSON outputs from the protest frame detector) to ground your comparison; rely on article text when cues are absent.
+- `direction` should be `appeared` when absent previously but present now, `disappeared` for the reverse, `unchanged` otherwise.
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+cues.cue.law_and_order_emphasis: Coverage that foregrounds policing, control, or legal compliance over protesters’ aims.
+cues.cue.violence_highlight: Coverage that prioritizes conflict, clashes, or damage associated with the protest.
+cues.direction.unchanged: The cue is present or absent in both versions to a similar degree.
+cues.direction.appeared: The cue is newly present in the current version after being absent before.
+cues.direction.disappeared: The cue no longer appears in the current version after being present before.
+</labels>
+
+<examples>
+Example: Earlier version highlights "rioters smashed windows" while later version reframes around "marchers calling for reform". → law_and_order_emphasis direction "disappeared", violence_highlight direction "disappeared".
+</examples>
+
+<json_output>
+{
+  "cues":[
+    {"cue":"law_and_order_emphasis","prev":false,"curr":false,"direction":"unchanged|appeared|disappeared"}
+  ]
+}
+</json_output>
+
+<article>
+prev_text: {{v_prev}}
+curr_text: {{v_curr}}
+</article>
+
+<protest_prev>
+{{prev_protest_cues}}
+</protest_prev>
+
+<protest_curr>
+{{curr_protest_cues}}
+</protest_curr>

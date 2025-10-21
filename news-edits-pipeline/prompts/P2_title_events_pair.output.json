@@ -1,0 +1,56 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "title_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "canonical": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "entered_title",
+              "left_title"
+            ]
+          }
+        },
+        "required": [
+          "canonical",
+          "event"
+        ]
+      }
+    },
+    "lede_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "canonical": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "entered_lede",
+              "left_lede"
+            ]
+          }
+        },
+        "required": [
+          "canonical",
+          "event"
+        ]
+      }
+    }
+  },
+  "required": [
+    "title_events",
+    "lede_events"
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "speech_style_changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "canonical": {
+            "type": "string"
+          },
+          "change": {
+            "type": "string",
+            "enum": [
+              "direct_to_indirect",
+              "indirect_to_direct",
+              "unchanged"
+            ]
+          },
+          "delta_quoted_words": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "canonical",
+          "change",
+          "delta_quoted_words"
+        ]
+      }
+    }
+  },
+  "required": [
+    "speech_style_changes"
+  ]
+}

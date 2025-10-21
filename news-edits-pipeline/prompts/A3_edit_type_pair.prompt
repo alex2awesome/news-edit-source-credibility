@@ -1,0 +1,123 @@
+You compare consecutive article versions to characterize the edits made. Please help me review the two article versions and, for each meaningful edit you detect, classify it accurately.
+<rules>
+Guidelines:
+- Base judgments only on provided strings.
+- Use the structured `prev_source_mentions` and `curr_source_mentions` lists to reason about sourcing changes; rely on article text only when necessary.
+- Identify every substantive edit between the versions (not just a single edit). If many edits occur, summarize the dominant patterns that best explain the changes.
+- Prioritize sourcing edits over stylistic tweaks when both occur.
+- `sources_added` and `sources_removed` should list canonicalized forms when possible; omit members if none.
+- Set `angle_changed` true only if overall focus, blame, key actors, or impact framing shifts materially.
+- Keep `summary_of_change` to a single, factual sentence that highlights the most significant edits.
+- Report `confidence` on a 1–5 scale (1 = very low, 5 = very high).
+- Return ONLY JSON fitting the schema.
+</rules>
+
+<labels>
+edit_type.copyedit: Surface-level language polishing that leaves meaning unchanged.
+edit_type.content_update: New factual material or narrative beats expand the story meaningfully.
+edit_type.new_source_added: Additional sources are introduced without removing existing ones.
+edit_type.source_removed: Previously cited sources disappear without replacement.
+edit_type.emphasis_change: The focus shifts to elevate different details or actors without adding major facts.
+edit_type.correction: An edit fixes an admitted factual error or misstatement.
+edit_type.title_change: The headline meaningfully changes while body edits may be minimal.
+edit_type.other: The change does not fit other categories but remains substantive.
+sources_added.type.government: The added source speaks on behalf of a government body or official.
+sources_added.type.civil_society: The added source represents a non-governmental civic or advocacy organization.
+sources_added.type.individual: The added source is a named person speaking personally.
+sources_added.type.corporate: The added source represents a private-sector organization or industry group.
+sources_added.type.law_enforcement: The added source speaks for police, prosecutors, or investigative agencies.
+sources_added.type.unknown: The added source’s affiliation cannot be determined.
+sources_removed.type.government: The removed source previously spoke for a government body or official.
+sources_removed.type.civil_society: The removed source represented a non-governmental civic or advocacy organization.
+sources_removed.type.individual: The removed source was a named person speaking personally.
+sources_removed.type.corporate: The removed source represented a private-sector organization or industry group.
+sources_removed.type.law_enforcement: The removed source spoke for police, prosecutors, or investigative agencies.
+sources_removed.type.unknown: The removed source’s affiliation could not be determined.
+</labels>
+
+<examples>
+Example 1 Input:
+prev_title: City expands testing after weekend outbreak
+curr_title: City expands testing after weekend outbreak
+
+prev_text:
+City health director Aaron Bloom said Sunday that 12 residents tested positive and clinics were preparing more appointments.
+
+curr_text:
+City health director Aaron Bloom said Sunday that 18 residents tested positive. A CDC spokesperson added in a statement that the agency shipped 5,000 rapid tests to the region.
+
+sources_prev:
+[
+  {
+    "surface": "Aaron Bloom",
+    "canonical": "Aaron Bloom",
+    "type": "government",
+    "speech_style": "indirect",
+    "attribution_verb": "said"
+  }
+]
+
+sources_curr:
+[
+  {
+    "surface": "Aaron Bloom",
+    "canonical": "Aaron Bloom",
+    "type": "government",
+    "speech_style": "indirect",
+    "attribution_verb": "said"
+  },
+  {
+    "surface": "CDC spokesperson",
+    "canonical": "Centers for Disease Control and Prevention spokesperson",
+    "type": "government",
+    "speech_style": "indirect",
+    "attribution_verb": "added"
+  }
+]
+
+Example 1 Output:
+{
+  "edit_type": "content_update",
+  "sources_added": [
+    {
+      "surface": "CDC spokesperson",
+      "canonical": "Centers for Disease Control and Prevention spokesperson",
+      "type": "government"
+    }
+  ],
+  "sources_removed": [],
+  "angle_changed": false,
+  "summary_of_change": "Added CDC statement updating case totals from 12 to 18 positive residents.",
+  "confidence": 4
+}
+</examples>
+
+<json_output>
+{
+  "edit_type": "copyedit|content_update|new_source_added|source_removed|emphasis_change|correction|title_change|other",
+  "sources_added": [{"surface":"...", "canonical":"...", "type":"..."}],
+  "sources_removed": [{"surface":"...", "canonical":"...", "type":"..."}],
+  "angle_changed": true|false,
+  "summary_of_change": "1 sentence",
+  "confidence": 1
+}
+</json_output>
+
+<article>
+prev_title: {{prev_title}}
+curr_title: {{curr_title}}
+
+prev_text:
+{{prev_version_text}}
+
+curr_text:
+{{curr_version_text}}
+</article>
+
+<sources_prev>
+{{prev_source_mentions}}
+</sources_prev>
+
+<sources_curr>
+{{curr_source_mentions}}
+</sources_curr>

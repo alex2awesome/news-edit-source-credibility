@@ -1,0 +1,145 @@
+Create a sourcing health report for this single article version. Please help me describe what the mix of voices in this version tells us, emphasizing insights we cannot get from other prompts.
+<rules>
+- Use the structured `source_mentions` catalog as primary evidence for source types, attribution styles, and hedging; consult the article text only when the catalog is empty or missing detail.
+- Highlight the overall shape of the sourcing rather than estimating precise numerical shares.
+- Use each label definition in `<labels>` as the ground truth for how categories should be applied.
+- Select up to three `highlighted_sources` that best illustrate the sourcing posture in this version.
+- Only output `"none"` in list fields when no other label applies, and never mix `"none"` with additional labels.
+- Report `confidence` on a 1–5 scale (1 = very low, 5 = very high).
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+sourcing_overview.coverage_level.no_sources: No attributed voices appear anywhere in the version.
+sourcing_overview.coverage_level.single_perspective: The sourcing centers on one perspective or institution without meaningful countervoices.
+sourcing_overview.coverage_level.multi_perspective: Multiple perspectives appear but one clearly dominates the narrative.
+sourcing_overview.coverage_level.diverse: The version amplifies a balanced mix of perspectives without any single voice dominating.
+sourcing_overview.institutional_reliance.none: The version relies exclusively on non-institutional or community voices.
+sourcing_overview.institutional_reliance.low: Institutional voices appear but are clearly secondary to non-institutional sources.
+sourcing_overview.institutional_reliance.mixed: Institutional and non-institutional voices receive comparable emphasis.
+sourcing_overview.institutional_reliance.high: Institutional sources provide most of the attributed information.
+sourcing_overview.anonymous_usage.none: No anonymous or unnamed sourcing is present.
+sourcing_overview.anonymous_usage.limited: Anonymous sourcing appears rarely and supports peripheral details.
+sourcing_overview.anonymous_usage.moderate: Anonymous sourcing recurs in the version but is balanced by named attribution.
+sourcing_overview.anonymous_usage.heavy: Anonymous sourcing supplies most of the substantive information.
+sourcing_overview.directness_profile.mostly_direct: The version relies primarily on direct quotations.
+sourcing_overview.directness_profile.balanced: Direct and indirect speech are used in roughly equal measure.
+sourcing_overview.directness_profile.mostly_indirect: The version mainly paraphrases or summarizes sources without quoting them directly.
+sourcing_overview.directness_profile.unclear: The available evidence is insufficient to judge the balance of direct and indirect speech.
+notable_coverage_gaps.none: No obvious audience or perspective gaps are apparent.
+notable_coverage_gaps.missing_impacted_voices: People directly affected by the story are absent or barely heard.
+notable_coverage_gaps.missing_government_response: Official or institutional replies to key claims are missing.
+notable_coverage_gaps.missing_opposition: Countervailing or dissenting perspectives are absent.
+notable_coverage_gaps.missing_expert_context: Relevant experts or data interpreters are missing.
+notable_coverage_gaps.missing_local_perspective: Local community or on-the-ground voices are absent.
+notable_coverage_gaps.missing_accountability: Entities responsible for decisions or harm are not quoted or paraphrased.
+style_risk_flags.none: No stylistic sourcing risks stand out.
+style_risk_flags.over_reliance_anonymous: Anonymous or unnamed sources dominate the sourcing without adequate balance or justification.
+style_risk_flags.delegitimizing_language: The narration frames sources with language that undermines their credibility without evidence.
+style_risk_flags.imbalanced_gender: The sourcing noticeably favors one gender or excludes others.
+style_risk_flags.stigmatizing_terms: The version uses stigmatizing or pejorative labels for individuals or groups.
+style_risk_flags.lacking_transparency: The story withholds key sourcing details that readers need to evaluate credibility.
+style_risk_flags.weak_source_corroboration: Major claims rest on single or weakly corroborated sources.
+highlighted_sources.role.government: The source speaks for a government entity or elected office.
+highlighted_sources.role.civil_society: The source represents a non-governmental organization, advocacy group, or religious institution.
+highlighted_sources.role.individual: The source is a named individual speaking for themselves without institutional affiliation.
+highlighted_sources.role.corporate: The source represents a private company or industry group.
+highlighted_sources.role.law_enforcement: The source speaks for police, prosecutors, or related investigative agencies.
+highlighted_sources.role.unknown: The source’s affiliation cannot be confidently determined.
+highlighted_sources.role.community_member: The source is a community voice or eyewitness without formal authority.
+highlighted_sources.role.subject_of_story: The source is the person or group directly at the center of the narrative.
+highlighted_sources.role.expert: The source provides specialized or technical expertise.
+highlighted_sources.role.journalist: The source is another journalist or news organization cited in the piece.
+highlighted_sources.role.other: The source does not fit the predefined categories.
+highlighted_sources.reason.lead_voice: The source drives the central narrative or appears most prominently.
+highlighted_sources.reason.counterpoint: The source offers a contrasting or dissenting perspective.
+highlighted_sources.reason.policy_context: The source explains policy, law, or institutional context for readers.
+highlighted_sources.reason.affected_party: The source represents people experiencing the consequences of the story.
+highlighted_sources.reason.credibility_anchor: The source bolsters trust by providing verification, data, or unique access.
+highlighted_sources.reason.other: The source stands out for a reason not captured by other labels.
+</labels>
+
+<examples>
+Example 1 Input:
+Text:
+State emergency director Carla Miles told reporters the wildfire was 40% contained. "We need residents to stay alert," said volunteer captain Jordan Price, who leads the valley fire brigade. A Red Cross spokesperson said two shelters opened overnight.
+
+Sources:
+[
+  {
+    "canonical": "Carla Miles",
+    "type": "government",
+    "speech_style": "indirect",
+    "attribution_verb": "told",
+    "hedge_analysis": {"hedge_markers": [], "hedge_count": 0},
+    "hedge_count": 0
+  },
+  {
+    "canonical": "Jordan Price",
+    "type": "civil_society",
+    "speech_style": "direct",
+    "attribution_verb": "said",
+    "hedge_analysis": {"hedge_markers": [], "hedge_count": 0},
+    "hedge_count": 0
+  },
+  {
+    "canonical": "Red Cross spokesperson",
+    "type": "civil_society",
+    "speech_style": "indirect",
+    "attribution_verb": "said",
+    "hedge_analysis": {"hedge_markers": [], "hedge_count": 0},
+    "hedge_count": 0
+  }
+]
+
+Example 1 Output:
+{
+  "version_id": "sample-version-045",
+  "sourcing_overview": {
+    "coverage_level": "multi_perspective",
+    "institutional_reliance": "mixed",
+    "anonymous_usage": "none",
+    "directness_profile": "balanced"
+  },
+  "notable_coverage_gaps": ["missing_opposition"],
+  "style_risk_flags": ["none"],
+  "highlighted_sources": [
+    {
+      "canonical": "Carla Miles",
+      "role": "government",
+      "reason": "policy_context"
+    },
+    {
+      "canonical": "Jordan Price",
+      "role": "civil_society",
+      "reason": "affected_party"
+    }
+  ],
+  "confidence": 4
+}
+</examples>
+
+<json_output>
+{
+  "version_id": "{{version_id}}",
+  "sourcing_overview": {
+    "coverage_level": "no_sources|single_perspective|multi_perspective|diverse",
+    "institutional_reliance": "none|low|mixed|high",
+    "anonymous_usage": "none|limited|moderate|heavy",
+    "directness_profile": "mostly_direct|balanced|mostly_indirect|unclear"
+  },
+  "notable_coverage_gaps": ["none|missing_impacted_voices|missing_government_response|missing_opposition|missing_expert_context|missing_local_perspective|missing_accountability"],
+  "style_risk_flags": ["none|over_reliance_anonymous|delegitimizing_language|imbalanced_gender|stigmatizing_terms|lacking_transparency|weak_source_corroboration"],
+  "highlighted_sources": [{"canonical":"...", "role":"government|civil_society|individual|corporate|law_enforcement|unknown|community_member|subject_of_story|expert|journalist|other", "reason":"lead_voice|counterpoint|policy_context|affected_party|credibility_anchor|other"}],
+  "confidence": 1
+}
+</json_output>
+
+<article>
+Text:
+{{version_text}}
+</article>
+
+<sources>
+{{source_mentions}}
+</sources>

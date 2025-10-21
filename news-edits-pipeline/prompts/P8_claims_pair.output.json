@@ -1,0 +1,48 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "proposition": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "stable",
+              "elaborated",
+              "contradicted",
+              "retracted"
+            ]
+          },
+          "change_note": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          }
+        },
+        "required": [
+          "id",
+          "proposition",
+          "status",
+          "change_note",
+          "confidence"
+        ]
+      }
+    }
+  },
+  "required": [
+    "claims"
+  ]
+}

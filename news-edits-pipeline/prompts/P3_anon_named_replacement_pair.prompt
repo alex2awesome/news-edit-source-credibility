@@ -1,0 +1,46 @@
+Identify instances where an anonymous reference becomes a named source (or vice versa). Please help me spot where sources switch between anonymous and named across these versions.
+<rules>
+- Consider contextual clues and matching roles/responsibilities.
+- Use `prev_source_mentions`/`curr_source_mentions` (JSON lists) and the anonymous mention summaries to align references across versions before deciding on replacements.
+- `direction` marks the change direction.
+- `likelihood` ranges 0.0–1.0 reflecting certainty.
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+replacements.direction.anon_to_named: An anonymous reference becomes attributed to a specific named source.
+replacements.direction.named_to_anon: A previously named source becomes anonymous in the later version.
+</labels>
+
+<examples>
+Example: Earlier version quotes "Deputy Mayor Lisa Chen"; later version replaces with "a city official". → replacements entry {"from":"Deputy Mayor Lisa Chen","to":"a city official","direction":"named_to_anon","likelihood":0.8}.
+</examples>
+
+<json_output>
+{
+  "replacements":[
+    {"from":"Unnamed government official","to":"U.S. Department of Defense","direction":"anon_to_named|named_to_anon","likelihood": 0.0}
+  ]
+}
+</json_output>
+
+<article>
+prev_text: {{v_prev}}
+curr_text: {{v_curr}}
+</article>
+
+<sources_prev>
+{{prev_source_mentions}}
+</sources_prev>
+
+<sources_curr>
+{{curr_source_mentions}}
+</sources_curr>
+
+<anonymous_prev>
+{{prev_anonymous}}
+</anonymous_prev>
+
+<anonymous_curr>
+{{curr_anonymous}}
+</anonymous_curr>

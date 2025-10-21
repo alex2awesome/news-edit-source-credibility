@@ -1,0 +1,71 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "frame_cues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cue": {
+            "type": "string"
+          },
+          "present": {
+            "type": "boolean"
+          },
+          "evidence_snippet": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cue",
+          "present",
+          "evidence_snippet"
+        ]
+      }
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "depiction": {
+            "type": "string",
+            "enum": [
+              "orderly",
+              "violent",
+              "diverse",
+              "unclear",
+              "restraint",
+              "force",
+              "neutral"
+            ]
+          },
+          "evidence_snippet": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "depiction",
+          "evidence_snippet"
+        ]
+      }
+    },
+    "confidence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5
+    }
+  },
+  "required": [
+    "frame_cues",
+    "roles",
+    "confidence"
+  ]
+}

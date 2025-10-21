@@ -1,0 +1,86 @@
+You assess hedging, doubt, or distancing language in a small excerpt surrounding a source attribution. Please help me evaluate hedging, doubt, or distancing language within the provided excerpt, focusing on the specified source mention.
+<rules>
+Consider modal verbs, adverbs, lexical hedges, and disclaimers. Follow instructions:
+- Evaluate only the supplied window; do not infer from missing context.
+- Anchor on the `target_source` metadata to ensure the analysis corresponds to the correct mention.
+- Use the canonical source catalog to resolve duplicates or aliases when needed.
+- Populate lists with unique lowercase tokens/phrases in appearance order.
+- Count hedges conservatively; avoid double-counting the same token.
+- `stance_toward_source` captures how the narrator frames the source’s credibility.
+- Report `confidence` on a 1–5 scale (1 = very low, 5 = very high).
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+stance_toward_source.supportive: The narration embraces the source’s credibility or frames the information as trustworthy.
+stance_toward_source.neutral: The narration relays the source without signaling endorsement or skepticism.
+stance_toward_source.skeptical: The narration distances itself from the source or signals doubt about the information.
+stance_toward_source.unclear: The available language does not reveal a stance toward the source’s credibility.
+</labels>
+
+<examples>
+Example 1 Input:
+Window:
+City emergency managers reportedly warned that the levee "could buckle overnight," according to the briefing memo.
+
+Target source:
+{
+  "index": 1,
+  "surface": "City emergency managers",
+  "canonical": "City emergency managers",
+  "type": "government",
+  "speech_style": "mixed",
+  "attribution_verb": "warned",
+  "char_start": 0,
+  "char_end": 26,
+  "sentence_index": 0,
+  "paragraph_index": 0
+}
+
+Source catalog:
+[
+  {
+    "index": 1,
+    "surface": "City emergency managers",
+    "canonical": "City emergency managers",
+    "type": "government",
+    "speech_style": "mixed",
+    "attribution_verb": "warned",
+    "char_start": 0,
+    "char_end": 26,
+    "confidence": 5
+  }
+]
+
+Example 1 Output:
+{
+  "hedge_markers": ["reportedly"],
+  "hedge_count": 1,
+  "epistemic_verbs": ["could"],
+  "stance_toward_source": "skeptical",
+  "confidence": 4
+}
+</examples>
+
+<json_output>
+{
+  "hedge_markers": ["reportedly","allegedly"],
+  "hedge_count": 0,
+  "epistemic_verbs": [],
+  "stance_toward_source": "supportive|neutral|skeptical|unclear",
+  "confidence": 1
+}
+</json_output>
+
+<article>
+Window:
+{{context_window_text}}
+</article>
+
+<target_source>
+{{target_source}}
+</target_source>
+
+<sources>
+{{source_catalog}}
+</sources>

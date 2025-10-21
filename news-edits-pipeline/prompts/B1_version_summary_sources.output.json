@@ -1,0 +1,144 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version_id": {
+      "type": "string"
+    },
+    "sourcing_overview": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "coverage_level": {
+          "type": "string",
+          "enum": [
+            "no_sources",
+            "single_perspective",
+            "multi_perspective",
+            "diverse"
+          ]
+        },
+        "institutional_reliance": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "mixed",
+            "high"
+          ]
+        },
+        "anonymous_usage": {
+          "type": "string",
+          "enum": [
+            "none",
+            "limited",
+            "moderate",
+            "heavy"
+          ]
+        },
+        "directness_profile": {
+          "type": "string",
+          "enum": [
+            "mostly_direct",
+            "balanced",
+            "mostly_indirect",
+            "unclear"
+          ]
+        }
+      },
+      "required": [
+        "coverage_level",
+        "institutional_reliance",
+        "anonymous_usage",
+        "directness_profile"
+      ]
+    },
+    "notable_coverage_gaps": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "none",
+          "missing_impacted_voices",
+          "missing_government_response",
+          "missing_opposition",
+          "missing_expert_context",
+          "missing_local_perspective",
+          "missing_accountability"
+        ]
+      }
+    },
+    "style_risk_flags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "none",
+          "over_reliance_anonymous",
+          "delegitimizing_language",
+          "imbalanced_gender",
+          "stigmatizing_terms",
+          "lacking_transparency",
+          "weak_source_corroboration"
+        ]
+      }
+    },
+    "highlighted_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "canonical": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "government",
+              "civil_society",
+              "individual",
+              "corporate",
+              "law_enforcement",
+              "unknown",
+              "community_member",
+              "subject_of_story",
+              "expert",
+              "journalist",
+              "other"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "lead_voice",
+              "counterpoint",
+              "policy_context",
+              "affected_party",
+              "credibility_anchor",
+              "other"
+            ]
+          }
+        },
+        "required": [
+          "canonical",
+          "role",
+          "reason"
+        ]
+      }
+    },
+    "confidence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5
+    }
+  },
+  "required": [
+    "version_id",
+    "sourcing_overview",
+    "notable_coverage_gaps",
+    "style_risk_flags",
+    "highlighted_sources",
+    "confidence"
+  ]
+}

@@ -1,0 +1,71 @@
+Assess sentiment/stance shifts toward named entities. Please help me assess how sentiment or stance toward each named entity changes between these article versions.
+<rules>
+- Compare evaluative language, quoted opinions, and framing adjectives.
+- Use `prev_source_mentions` and `curr_source_mentions` (JSON lists) to identify recurring actors and align stance shifts; extend to other named entities found in text as needed.
+- `delta` should be +1 when stance becomes more supportive, -1 when more skeptical/negative, 0 when unchanged.
+- If stance cannot be determined, use `"unclear"` for both fields and `delta:0`.
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+entities.prev_stance.supportive: The earlier version presents the entity positively or affirms its credibility.
+entities.prev_stance.neutral: The earlier version references the entity without evaluative language.
+entities.prev_stance.skeptical: The earlier version questions, criticizes, or casts doubt on the entity.
+entities.prev_stance.unclear: The earlier version does not supply enough evidence to determine stance.
+entities.curr_stance.supportive: The later version presents the entity positively or affirms its credibility.
+entities.curr_stance.neutral: The later version references the entity without evaluative language.
+entities.curr_stance.skeptical: The later version questions, criticizes, or casts doubt on the entity.
+entities.curr_stance.unclear: The later version does not supply enough evidence to determine stance.
+</labels>
+
+<examples>
+Example 1 Input:
+prev_text:
+Advocates praised Mayor Ruiz for the swift housing response, calling the program "a lifesaver."
+
+curr_text:
+Activists now accuse Mayor Ruiz of ignoring earlier promises and say the housing response "barely dents the crisis."
+
+sources_prev:
+[
+  {"canonical": "Mayor Ruiz", "type": "government"}
+]
+
+sources_curr:
+[
+  {"canonical": "Mayor Ruiz", "type": "government"}
+]
+
+Example 1 Output:
+{
+  "entities": [
+    {
+      "canonical": "Mayor Ruiz",
+      "prev_stance": "supportive",
+      "curr_stance": "skeptical",
+      "delta": -1
+    }
+  ]
+}
+</examples>
+
+<json_output>
+{
+  "entities":[
+    {"canonical":"...", "prev_stance":"supportive|neutral|skeptical|unclear","curr_stance":"...", "delta": -1|0|+1}
+  ]
+}
+</json_output>
+
+<article>
+prev_text: {{v_prev}}
+curr_text: {{v_curr}}
+</article>
+
+<sources_prev>
+{{prev_source_mentions}}
+</sources_prev>
+
+<sources_curr>
+{{curr_source_mentions}}
+</sources_curr>

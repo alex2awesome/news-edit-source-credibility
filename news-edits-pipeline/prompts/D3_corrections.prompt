@@ -1,0 +1,44 @@
+Identify explicit corrections, clarifications, or editor’s notes. Please help me identify any corrections, clarifications, or editor's notes in this article text.
+<rules>
+- Look for keywords like “Correction”, “Clarification”, or italicized notes that admit prior error.
+- `correction_affects` may list multiple values if the note covers several aspects; use `"none"` only when no change is described despite the section existing.
+- Copy the correction or clarification note verbatim into `correction_text`. If none exists, return an empty string.
+- Report `confidence` on a 1–5 scale (1 = very low, 5 = very high).
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+correction_affects.source_identity: The note clarifies or corrects who was quoted or referenced.
+correction_affects.claim_content: The note revises the substance of a factual assertion.
+correction_affects.numbers: The note fixes a quantitative value such as counts, dates, or percentages.
+correction_affects.typo: The note corrects spelling, grammar, or other mechanical errors without factual impact.
+correction_affects.none: The note acknowledges no specific change even though a correction section is present.
+</labels>
+
+<examples>
+Example 1 Input:
+Text:
+Correction: An earlier version misstated the number of injured; it is 12, not 21.
+
+Example 1 Output:
+{
+  "has_correction": true,
+  "correction_affects": ["numbers"],
+  "correction_text": "Correction: An earlier version misstated the number of injured; it is 12, not 21.",
+  "confidence": 5
+}
+</examples>
+
+<json_output>
+{
+  "has_correction": false,
+  "correction_affects": ["source_identity|claim_content|numbers|typo|none"],
+  "correction_text": "",
+  "confidence": 1
+}
+</json_output>
+
+<article>
+Text:
+{{version_text}}
+</article>

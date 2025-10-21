@@ -1,0 +1,65 @@
+Evaluate changes in attribution verb strength for each continuing source. Please help me evaluate how attribution verb strength changes for recurring sources between these versions.
+<rules>
+- Compare verbs that describe how the source communicated (e.g., “said”, “insisted”, “blasted”).
+- Use the canonical `prev_source_mentions` and `curr_source_mentions` lists to align sources and retrieve verb/context details.
+- `strength_delta` ranges from -1.0 (weaker) to +1.0 (stronger). Use 0.0 when unchanged or unclear.
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+by_source.strength_delta.positive: Values above 0 indicate the later verbs imply greater force, certainty, or intensity.
+by_source.strength_delta.zero: A value of 0 indicates comparable verb strength across versions or insufficient evidence to judge.
+by_source.strength_delta.negative: Values below 0 indicate the later verbs are weaker, more tentative, or less forceful.
+</labels>
+
+<examples>
+Example 1 Input:
+prev_text:
+Council member Dana Cho blasted the proposal and insisted the audit was overdue.
+
+curr_text:
+Council member Dana Cho said the proposal was flawed and noted audits can help.
+
+sources_prev:
+[
+  {"canonical": "Dana Cho", "speech_style": "direct", "attribution_verb": "blasted"}
+]
+
+sources_curr:
+[
+  {"canonical": "Dana Cho", "speech_style": "indirect", "attribution_verb": "said"}
+]
+
+Example 1 Output:
+{
+  "by_source": [
+    {
+      "canonical": "Dana Cho",
+      "prev_verbs": ["blasted", "insisted"],
+      "curr_verbs": ["said", "noted"],
+      "strength_delta": -0.5
+    }
+  ]
+}
+</examples>
+
+<json_output>
+{
+  "by_source":[
+    {"canonical":"...", "prev_verbs":["say"], "curr_verbs":["confirm"], "strength_delta": 0.0}
+  ]
+}
+</json_output>
+
+<article>
+prev_text: {{v_prev}}
+curr_text: {{v_curr}}
+</article>
+
+<sources_prev>
+{{prev_source_mentions}}
+</sources_prev>
+
+<sources_curr>
+{{curr_source_mentions}}
+</sources_curr>

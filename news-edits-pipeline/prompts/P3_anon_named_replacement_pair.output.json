@@ -1,0 +1,42 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "replacements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "anon_to_named",
+              "named_to_anon"
+            ]
+          },
+          "likelihood": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "direction",
+          "likelihood"
+        ]
+      }
+    }
+  },
+  "required": [
+    "replacements"
+  ]
+}

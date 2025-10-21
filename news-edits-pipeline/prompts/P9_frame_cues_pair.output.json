@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "cues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cue": {
+            "type": "string"
+          },
+          "prev": {
+            "type": "boolean"
+          },
+          "curr": {
+            "type": "boolean"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "unchanged",
+              "appeared",
+              "disappeared"
+            ]
+          }
+        },
+        "required": [
+          "cue",
+          "prev",
+          "curr",
+          "direction"
+        ]
+      }
+    }
+  },
+  "required": [
+    "cues"
+  ]
+}

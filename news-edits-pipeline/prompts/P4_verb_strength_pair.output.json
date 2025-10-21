@@ -1,0 +1,44 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "by_source": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "canonical": {
+            "type": "string"
+          },
+          "prev_verbs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "curr_verbs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "strength_delta": {
+            "type": "number",
+            "minimum": -1.0,
+            "maximum": 1.0
+          }
+        },
+        "required": [
+          "canonical",
+          "prev_verbs",
+          "curr_verbs",
+          "strength_delta"
+        ]
+      }
+    }
+  },
+  "required": [
+    "by_source"
+  ]
+}

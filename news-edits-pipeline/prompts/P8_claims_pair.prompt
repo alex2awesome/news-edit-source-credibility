@@ -1,0 +1,36 @@
+Track the status of key factual or causal claims across versions. Please help me track how key factual or causal claims evolve between these article versions.
+<rules>
+- Assign stable IDs (`"C1"`, `"C2"`, etc.) so future processing can match them.
+- `status` definitions:
+  - `stable`: claim remains substantively unchanged.
+  - `elaborated`: new supporting detail or nuance added.
+  - `contradicted`: later text disputes or reverses the earlier claim.
+  - `retracted`: claim removed or explicitly withdrawn.
+- Provide a short `change_note` summarizing the shift.
+- Report `confidence` on a 1–5 scale (1 = very low, 5 = very high).
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+claims.status.stable: The claim’s meaning and support remain materially unchanged.
+claims.status.elaborated: The claim gains meaningful new detail, evidence, or nuance.
+claims.status.contradicted: The later version disputes or reverses the prior claim.
+claims.status.retracted: The later version removes the claim or explicitly withdraws it.
+</labels>
+
+<examples>
+Example: Version 1 states "Officials said the bridge reopened Friday"; version 2 changes to "Officials now say the bridge remains closed." → claim id C1 with status "contradicted" and change_note noting reversal.
+</examples>
+
+<json_output>
+{
+  "claims":[
+    {"id":"C1", "proposition":"...", "status":"stable|elaborated|contradicted|retracted", "change_note":"...", "confidence": 1}
+  ]
+}
+</json_output>
+
+<article>
+prev_text: {{v_prev}}
+curr_text: {{v_curr}}
+</article>

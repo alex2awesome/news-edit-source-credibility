@@ -1,0 +1,59 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "numeric_changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "item": {
+            "type": "string"
+          },
+          "prev": {
+            "type": "string"
+          },
+          "curr": {
+            "type": "string"
+          },
+          "delta": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "change_type": {
+            "type": "string",
+            "enum": [
+              "update",
+              "correction",
+              "refinement"
+            ]
+          },
+          "confidence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          }
+        },
+        "required": [
+          "item",
+          "prev",
+          "curr",
+          "delta",
+          "unit",
+          "source",
+          "change_type",
+          "confidence"
+        ]
+      }
+    }
+  },
+  "required": [
+    "numeric_changes"
+  ]
+}

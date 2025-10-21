@@ -1,0 +1,50 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "canonical": {
+            "type": "string"
+          },
+          "prev_stance": {
+            "type": "string",
+            "enum": [
+              "supportive",
+              "neutral",
+              "skeptical",
+              "unclear"
+            ]
+          },
+          "curr_stance": {
+            "type": "string",
+            "enum": [
+              "supportive",
+              "neutral",
+              "skeptical",
+              "unclear"
+            ]
+          },
+          "delta": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "canonical",
+          "prev_stance",
+          "curr_stance",
+          "delta"
+        ]
+      }
+    }
+  },
+  "required": [
+    "entities"
+  ]
+}

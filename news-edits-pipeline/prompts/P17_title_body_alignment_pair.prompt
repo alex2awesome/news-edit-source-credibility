@@ -1,0 +1,33 @@
+Measure how well the headline aligns with the early body paragraphs. Please help me measure how headline-body alignment shifts between these versions.
+<rules>
+- Compute Jaccard overlaps using lowercase token sets (punctuation removed). Return the numeric overlaps v0/v1 even though the orchestrator will also compute them.
+- `title_sources_added/removed` enumerate entities whose names appear in one title but not the other.
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+jaccard_overlap_prev: Token overlap score between the earlier headline and lede, ranging from 0 (no overlap) to 1 (identical sets).
+jaccard_overlap_curr: Token overlap score between the later headline and lede, ranging from 0 (no overlap) to 1 (identical sets).
+title_sources_added: Entities newly appearing in the current headline relative to the previous version.
+title_sources_removed: Entities that were present in the previous headline but are now absent.
+</labels>
+
+<examples>
+Example: Headline shifts from "Teachers strike in Chicago" to "Mayor, Union reach deal" while lede stays similar. → jaccard_overlap_prev 0.6, jaccard_overlap_curr 0.4, title_sources_added ["Mayor"], title_sources_removed ["Teachers"].
+</examples>
+
+<json_output>
+{
+  "jaccard_overlap_prev": 0.0,
+  "jaccard_overlap_curr": 0.0,
+  "title_sources_added":["..."],
+  "title_sources_removed":["..."]
+}
+</json_output>
+
+<article>
+prev_title: {{title_prev}}
+curr_title: {{title_curr}}
+prev_text: {{v_prev_first_paragraph}}
+curr_text: {{v_curr_first_paragraph}}
+</article>

@@ -1,0 +1,60 @@
+Judge whether the dominant angle of the story changed between versions. Please help me determine whether the dominant angle changes between these article versions.
+<rules>
+Angle refers to the central storyline and framing emphasis (key actors, causes, consequences).
+- Compare who is foregrounded, what event or impact is emphasized, and the framing verbs/adjectives.
+- If change_type is `"unclear"`, leave `old_angle` and `new_angle` empty strings.
+- Provide short `evidence_snippets` copied verbatim from the relevant version(s); prepend "prev:" or "curr:" if helpful to distinguish sources.
+- Report `confidence` on a 1–5 scale (1 = very low, 5 = very high).
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+change_type.who: The edit shifts attention to different actors or speakers.
+change_type.what: The edit introduces or foregrounds different events or actions.
+change_type.why: The edit reframes causal explanations or motivations.
+change_type.responsibility: The edit changes who is portrayed as accountable or to blame.
+change_type.impact: The edit reframes consequences or affected groups.
+change_type.blame: The edit adjusts explicit accusations or exonerations.
+change_type.unclear: The angle shift is uncertain or cannot be categorized confidently.
+</labels>
+
+<examples>
+Example 1 Input:
+prev_text:
+Police investigators continued to map debris after Tuesday’s commuter train derailment, focusing on mechanical failure.
+
+curr_text:
+Families of the derailment victims gathered at city hall demanding answers, accusing the transit agency of ignoring maintenance warnings.
+
+Example 1 Output:
+{
+  "angle_changed": true,
+  "old_angle": "Authorities probe mechanical failure in the derailment",
+  "new_angle": "Families blame transit agency for ignoring maintenance warnings",
+  "change_type": "responsibility",
+  "evidence_snippets": [
+    "prev: Police investigators continued to map debris after Tuesday’s commuter train derailment, focusing on mechanical failure.",
+    "curr: Families of the derailment victims gathered at city hall demanding answers, accusing the transit agency of ignoring maintenance warnings."
+  ],
+  "confidence": 4
+}
+</examples>
+
+<json_output>
+{
+  "angle_changed": false,
+  "old_angle": "",
+  "new_angle": "",
+  "change_type": "who|what|why|responsibility|impact|blame|unclear",
+  "evidence_snippets": ["copy short supporting phrases exactly"],
+  "confidence": 1
+}
+</json_output>
+
+<article>
+prev_text:
+{{prev_version_text}}
+
+curr_text:
+{{curr_version_text}}
+</article>

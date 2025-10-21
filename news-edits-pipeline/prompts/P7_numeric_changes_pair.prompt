@@ -1,0 +1,34 @@
+Capture numeric statements that differ between versions. Please help me capture the numeric statements that change between these article versions.
+<rules>
+- Include changes to counts, percentages, monetary values, dates, rankings.
+- `delta` should describe the arithmetic change when meaningful (e.g., "+5", "-12%", "from 3 to 4").
+- `change_type`:
+  - `update`: new information supersedes old data without implying error.
+  - `correction`: fixes an inaccurate figure.
+  - `refinement`: adds precision or context (e.g., “more than 10” → “12”).
+- Report `confidence` on a 1–5 scale (1 = very low, 5 = very high).
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+numeric_changes.change_type.update: The new value replaces earlier information because circumstances evolved.
+numeric_changes.change_type.correction: The new value fixes a factual error present in the prior version.
+numeric_changes.change_type.refinement: The new value offers greater precision or clarifies an approximate earlier figure.
+</labels>
+
+<examples>
+Example entry: Previous text "at least 10 homes" becomes "12 homes" while citing the fire department. → {"item":"homes destroyed","prev":"at least 10","curr":"12","delta":"from 10+ to 12","unit":"homes","source":"fire department","change_type":"refinement","confidence":4}.
+</examples>
+
+<json_output>
+{
+  "numeric_changes":[
+    {"item":"...", "prev":"...", "curr":"...", "delta":"+2", "unit":"...", "source":"...", "change_type":"update|correction|refinement", "confidence": 1}
+  ]
+}
+</json_output>
+
+<article>
+prev_text: {{v_prev}}
+curr_text: {{v_curr}}
+</article>

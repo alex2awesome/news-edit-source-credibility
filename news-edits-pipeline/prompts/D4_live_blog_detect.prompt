@@ -1,0 +1,44 @@
+Determine whether this version behaves like a live blog or rolling update post. Please help me decide if this article version functions as a live blog or rolling update.
+<rules>
+- Signals include timestamped bulletins, rapid-fire short paragraphs, frequent “updated at” language, minute-by-minute formatting, or meta instructions to readers.
+- `signals` should list concise textual indicators you relied upon (up to 5).
+- Report `confidence` on a 1–5 scale (1 = very low, 5 = very high).
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+is_live_blog.true: The version follows a rolling-update format with timestamped or bulletin-style entries.
+is_live_blog.false: The version behaves like a conventional article rather than a live blog.
+</labels>
+
+<examples>
+Example 1 Input:
+Text:
+9:12 a.m. The mayor updates residents on road closures.
+9:45 a.m. Updated: Transit officials reopen the Green Line.
+Refresh this page for the latest bulletins.
+
+Example 1 Output:
+{
+  "is_live_blog": true,
+  "confidence": 5,
+  "signals": [
+    "9:12 a.m. timestamp",
+    "9:45 a.m. Updated",
+    "Refresh this page"
+  ]
+}
+</examples>
+
+<json_output>
+{
+  "is_live_blog": false,
+  "confidence": 1,
+  "signals": []
+}
+</json_output>
+
+<article>
+Text:
+{{version_text}}
+</article>

@@ -1,0 +1,85 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "article_id": {
+      "type": "string"
+    },
+    "version_id": {
+      "type": "string"
+    },
+    "timestamp_utc": {
+      "type": "string"
+    },
+    "source_mentions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "surface": {
+            "type": "string"
+          },
+          "canonical": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "government",
+              "civil_society",
+              "individual",
+              "corporate",
+              "law_enforcement",
+              "unknown"
+            ]
+          },
+          "speech_style": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "indirect",
+              "mixed"
+            ]
+          },
+          "attribution_verb": {
+            "type": "string",
+            "enum": [
+              "said",
+              "announced",
+              "claimed",
+              "denied",
+              "confirmed",
+              "ordered",
+              "estimated",
+              "unknown"
+            ]
+          },
+          "attributed_text": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          }
+        },
+        "required": [
+          "surface",
+          "canonical",
+          "type",
+          "speech_style",
+          "attribution_verb",
+          "attributed_text",
+          "confidence"
+        ]
+      }
+    }
+  },
+  "required": [
+    "article_id",
+    "version_id",
+    "timestamp_utc",
+    "source_mentions"
+  ]
+}

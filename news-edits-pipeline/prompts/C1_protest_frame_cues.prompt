@@ -1,0 +1,76 @@
+Identify protest-paradigm cues when the article concerns collective action. Please help me detect protest-paradigm cues in the provided article text.
+<rules>
+If the text is unrelated to protests, return all cues with `present:false` and roles with `depiction:"unclear"`.
+- Highlight law-and-order frames, emphasis on disruption, or delegitimizing language.
+- `evidence_snippet` should be a short substring (<160 chars) demonstrating the cue.
+- Report `confidence` on a 1–5 scale (1 = very low, 5 = very high).
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+frame_cues.cue.law_and_order_emphasis: The narrative spotlights enforcement actions, rules, or legal consequences over protesters’ goals.
+frame_cues.cue.violence_highlight: The narrative foregrounds physical clashes, property damage, or threats more than other aspects.
+roles.role.protesters: The participants advocating or demonstrating for change.
+roles.role.police: Law enforcement or security personnel responding to the protest.
+roles.depiction.orderly: The text presents the group as peaceful, procedural, or organized.
+roles.depiction.violent: The text portrays the group as engaging in aggression or destruction.
+roles.depiction.diverse: The text emphasizes the group’s heterogeneity or broad coalition.
+roles.depiction.unclear: The text does not characterize the group sufficiently to assign a depiction.
+roles.depiction.restraint: The text describes police using minimal force or exercising caution.
+roles.depiction.force: The text depicts police using forceful or coercive tactics.
+roles.depiction.neutral: The text presents police in a matter-of-fact way without value judgment.
+</labels>
+
+<examples>
+Example 1 Input:
+Text:
+Police declared an unlawful assembly after fireworks burst above the courthouse, saying demonstrators blocked the light-rail line for an hour. Protest organizers argued the march remained peaceful until riot squads advanced.
+
+Example 1 Output:
+{
+  "frame_cues": [
+    {
+      "cue": "law_and_order_emphasis",
+      "present": true,
+      "evidence_snippet": "Police declared an unlawful assembly"
+    },
+    {
+      "cue": "violence_highlight",
+      "present": true,
+      "evidence_snippet": "fireworks burst above the courthouse"
+    }
+  ],
+  "roles": [
+    {
+      "role": "protesters",
+      "depiction": "violent",
+      "evidence_snippet": "fireworks burst above the courthouse"
+    },
+    {
+      "role": "police",
+      "depiction": "force",
+      "evidence_snippet": "riot squads advanced"
+    }
+  ],
+  "confidence": 4
+}
+</examples>
+
+<json_output>
+{
+  "frame_cues": [
+    {"cue":"law_and_order_emphasis","present":false,"evidence_snippet":""},
+    {"cue":"violence_highlight","present":false,"evidence_snippet":""}
+  ],
+  "roles": [
+    {"role":"protesters","depiction":"orderly|violent|diverse|unclear","evidence_snippet":""},
+    {"role":"police","depiction":"restraint|force|neutral|unclear","evidence_snippet":""}
+  ],
+  "confidence": 1
+}
+</json_output>
+
+<article>
+Text:
+{{version_text}}
+</article>

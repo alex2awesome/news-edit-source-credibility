@@ -1,0 +1,16 @@
+vllm>=0.5
+openai>=1.40
+tiktoken
+sqlite-utils
+pandas
+numpy
+scikit-learn
+spacy>=3.7
+spacy-transformers
+rapidfuzz
+orjson
+python-Levenshtein
+PyYAML
+requests
+jsonschema
+tqdm

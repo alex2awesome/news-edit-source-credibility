@@ -1,0 +1,38 @@
+Detect transitions between direct and indirect speech for recurring sources. Please help me detect how speech style shifts for recurring sources across these versions.
+<rules>
+- Count quoted words difference using best approximation (number of tokens in quotations).
+- Use `prev_source_mentions` and `curr_source_mentions` (JSON lists) to align recurring sources and determine quote spans.
+- `change` indicates net movement; use `unchanged` when the balance is consistent.
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<labels>
+speech_style_changes.change.direct_to_indirect: The later version shifts a source from quoted speech to paraphrased or indirect speech.
+speech_style_changes.change.indirect_to_direct: The later version introduces direct quotations where paraphrase was used previously.
+speech_style_changes.change.unchanged: The balance of direct and indirect speech remains effectively the same.
+</labels>
+
+<examples>
+Example: Source quoted with "\"We will rebuild,\" the mayor said" becomes paraphrased "The mayor said the city would rebuild." → change "direct_to_indirect", delta_quoted_words negative reflecting fewer quoted words.
+</examples>
+
+<json_output>
+{
+  "speech_style_changes":[
+    {"canonical":"...", "change":"direct_to_indirect|indirect_to_direct|unchanged", "delta_quoted_words": 0}
+  ]
+}
+</json_output>
+
+<article>
+prev_text: {{v_prev}}
+curr_text: {{v_curr}}
+</article>
+
+<sources_prev>
+{{prev_source_mentions}}
+</sources_prev>
+
+<sources_curr>
+{{curr_source_mentions}}
+</sources_curr>

@@ -1,0 +1,111 @@
+You are an information-extraction assistant that produces structured sourcing data for newsroom research. Please help me identify all sources that provide information to this news article.
+<rules>
+Follow these rules exactly:
+- Read the full input before answering. Work only with the provided strings.
+- Do not invent character offsets or positional indexes—we will derive them later.
+- Only consider explicit or strongly implied sourcing statements (quotes, paraphrases, voice-of-God attribution).
+- Copy the `attributed_text` field exactly as it appears in the article, including quotation marks or punctuation if present. Do not normalize or paraphrase.
+- Do not guess. If the evidence is insufficient, omit the mention instead of fabricating fields.
+- Use lowercase keys exactly as shown in the schema.
+- Report `confidence` on a 1–5 scale (1 = very low, 5 = very high).
+
+Source type guidance:
+- `government`: federal, state, local offices, elected officials, military, courts.
+- `civil_society`: NGOs, advocacy groups, unions, religious organizations (non-governmental).
+- `individual`: named people not speaking on behalf of institutions.
+- `corporate`: private companies, publicly traded firms, industry groups.
+- `law_enforcement`: police, sheriffs, prosecutors, investigative bureaus.
+- `unknown`: any other case or insufficient information.
+
+Speech style guidance:
+- `direct` for verbatim quotations with quotation marks.
+- `indirect` for paraphrases, summaries, or attributions without quote marks.
+- `mixed` when both direct and indirect material is present in the attributed span.
+
+Attribution verbs should capture the strongest verb in the sourcing clause (e.g., “testified”, “confirmed”). Use lowercase infinitive form. If none is identifiable, output `"unknown"`.
+
+Return ONLY valid JSON conforming to the schema below.
+</rules>
+
+<labels>
+source_mentions.type.government: The source speaks on behalf of a government body, elected official, court, or military arm.
+source_mentions.type.civil_society: The source represents a non-governmental civic, advocacy, religious, or labor organization.
+source_mentions.type.individual: The source is a named person speaking for themselves rather than for an institution.
+source_mentions.type.corporate: The source represents a private-sector company or industry association.
+source_mentions.type.law_enforcement: The source speaks for police, prosecutors, or investigative agencies.
+source_mentions.type.unknown: The source’s affiliation cannot be confidently determined from the passage.
+source_mentions.speech_style.direct: The attributed text is a verbatim quotation enclosed in quotation marks.
+source_mentions.speech_style.indirect: The passage paraphrases or summarizes the source without quotation marks.
+source_mentions.speech_style.mixed: The span combines quoted material and paraphrase for the same attribution.
+source_mentions.attribution_verb.said: The source provides information using neutral verbs such as “said” or “told.”
+source_mentions.attribution_verb.announced: The source formally announces a decision or development.
+source_mentions.attribution_verb.claimed: The source advances a contested or uncertain assertion.
+source_mentions.attribution_verb.denied: The source rejects or refutes an accusation or claim.
+source_mentions.attribution_verb.confirmed: The source verifies information already circulating publicly.
+source_mentions.attribution_verb.ordered: The source issues an instruction or command.
+source_mentions.attribution_verb.estimated: The source provides an approximate figure or projection.
+source_mentions.attribution_verb.unknown: No clear attribution verb is available in the span.
+</labels>
+
+<examples>
+Example 1 Input:
+Article title:
+Governor pledges flood relief for river towns
+
+Article version text:
+"We will move trucks tonight," Governor Lisa Lee said, promising state funds for evacuations. Local relief coordinator Mariah Evans added that volunteers were already delivering blankets.
+
+Example 1 Output:
+{
+  "article_id": "sample-article-001",
+  "version_id": "sample-version-001",
+  "timestamp_utc": "2024-05-18T14:00:00Z",
+  "source_mentions": [
+    {
+      "surface": "Governor Lisa Lee",
+      "canonical": "Governor Lisa Lee",
+      "type": "government",
+      "speech_style": "direct",
+      "attribution_verb": "said",
+      "attributed_text": "\"We will move trucks tonight,\"",
+      "confidence": 5
+    },
+    {
+      "surface": "Mariah Evans",
+      "canonical": "Mariah Evans",
+      "type": "civil_society",
+      "speech_style": "indirect",
+      "attribution_verb": "added",
+      "attributed_text": "volunteers were already delivering blankets",
+      "confidence": 4
+    }
+  ]
+}
+</examples>
+
+<json_output>
+{
+  "article_id": "{{article_id}}",
+  "version_id": "{{version_id}}",
+  "timestamp_utc": "{{timestamp_utc}}",
+  "source_mentions": [
+    {
+      "surface": "U.S. Navy",
+      "canonical": "United States Navy",
+      "type": "government|civil_society|individual|corporate|law_enforcement|unknown",
+      "speech_style": "direct|indirect|mixed",
+      "attribution_verb": "said|announced|claimed|denied|confirmed|ordered|estimated|unknown",
+      "attributed_text": "exact quoted or paraphrased span attributed to the source",
+      "confidence": 1
+    }
+  ]
+}
+</json_output>
+
+<article>
+Article title:
+{{title}}
+
+Article version text:
+{{version_text}}
+</article>

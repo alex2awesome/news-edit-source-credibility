@@ -1,0 +1,46 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "movement_index": {
+      "type": "number",
+      "minimum": -1.0,
+      "maximum": 1.0
+    },
+    "moved_into_top20pct_tokens": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "examples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "snippet": {
+            "type": "string"
+          },
+          "prev_para": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "curr_para": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "snippet",
+          "prev_para",
+          "curr_para"
+        ]
+      }
+    }
+  },
+  "required": [
+    "movement_index",
+    "moved_into_top20pct_tokens",
+    "examples"
+  ]
+}
