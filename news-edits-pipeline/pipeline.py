@@ -7,18 +7,26 @@ import logging
 import os
 import sys
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+import asyncio
+from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
+import tiktoken
+import warnings
+warnings.filterwarnings("ignore", message="Using `TRANSFORMERS_CACHE` is deprecated", category=FutureWarning)
 
 import orjson
+import httpx
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 import requests
 import yaml
 from tqdm.auto import tqdm
+import re
 
 from analysis import (
     aggregate_sources_over_versions,
-    align_sentences,
     compute_diff_magnitude,
     compute_prominence_features,
     extract_lede,
@@ -29,7 +37,7 @@ from analysis import (
     segment,
 )
 from canonicalize import fuzzy_match_source, normalize_source
-from loader import iter_articles, load_versions
+from loader import iter_article_counts, load_versions
 from pipeline_utils import (
     OutputWriter,
     ensure_dir,
@@ -50,7 +58,7 @@ from pipeline_writer_utils import (
     insert_pair_replacements,
     insert_pair_sources_added,
     insert_pair_sources_removed,
-    insert_pair_title_events,
+    insert_pair_source_transitions,
     insert_source_mentions,
     insert_version_metrics,
     insert_version_pairs,
@@ -66,11 +74,29 @@ SYSTEM_PROMPT = (
     "You are a meticulous news-analysis assistant. Always emit valid JSON that matches the requested schema. "
     "Follow the schema exactly, but do NOT repeat the schema text."
 )
+HEDGE_WINDOW_BATCH_SIZE = 5  # number of source mentions evaluated per A2 hedging request
+
+
+def text_jaccard_similarity(text_a: str, text_b: str) -> float:
+    tokens_a = {tok.lower() for tok in re.findall(r"\w+", text_a or "")}
+    tokens_b = {tok.lower() for tok in re.findall(r"\w+", text_b or "")}
+    if not tokens_a and not tokens_b:
+        return 1.0
+    if not tokens_a or not tokens_b:
+        return 0.0
+    intersection = tokens_a & tokens_b
+    union = tokens_a | tokens_b
+    if not union:
+        return 0.0
+    return len(intersection) / len(union)
+
 
 @dataclass
 class Config:
     model: str
     vllm_api_base: str
+    spacy_model: str
+    tiktoken_encoding: Optional[str]
     temperature: float
     max_tokens: int
     batch_size: int
@@ -84,6 +110,9 @@ class Config:
     min_versions: int
     max_versions: Optional[int]
     cleanup_cached_dirs: bool
+    skip_similarity_threshold: Optional[float]
+    llm_retries: int
+    llm_retry_backoff_seconds: float
 
     @staticmethod
     def from_yaml(path: Path) -> "Config":
@@ -100,6 +129,8 @@ class Config:
         return Config(
             model=data.get("model"),
             vllm_api_base=data.get("vllm_api_base"),
+            spacy_model=data.get("spacy_model"),
+            tiktoken_encoding=data.get("tiktoken_encoding", "cl100k_base"),
             temperature=float(data.get("temperature", 0.0)),
             max_tokens=int(data.get("max_tokens", 2048)),
             batch_size=int(data.get("batch_size", 1)),
@@ -113,14 +144,27 @@ class Config:
             min_versions=min_versions,
             max_versions=max_versions,
             cleanup_cached_dirs=bool(data.get("cleanup_cached_dirs", False)),
+            skip_similarity_threshold=(
+                float(data["skip_similarity_threshold"])
+                if data.get("skip_similarity_threshold") is not None
+                else 0.95
+            ),
+            llm_retries=int(data.get("llm_retries", 2)),
+            llm_retry_backoff_seconds=float(data.get("llm_retry_backoff_seconds", 2.0)),
         )
 
 
 class StructuredLLMClient:
+    _TIMEOUT_SECONDS = 120
+
     def __init__(self, config: Config):
         self.config = config
         self.session = requests.Session()
         self.api_key = os.getenv("OPENAI_API_KEY") if config.backend == "vllm" else None
+        self.tokenizer = tiktoken.get_encoding(config.tiktoken_encoding or "cl100k_base")
+        self.system_prompt_length = len(self.tokenizer.encode(SYSTEM_PROMPT))
+        self._retry_backoff = max(0.0, config.llm_retry_backoff_seconds)
+        logger.info(f"System prompt length: {self.system_prompt_length}")
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -129,16 +173,31 @@ class StructuredLLMClient:
         return headers
 
     def _request_payload(self, prompt: str, response_format: Dict[str, Any]) -> Dict[str, Any]:
-        return {
+        too_long = False
+        input_tokens = self.tokenizer.encode(prompt)
+        max_tokens = max(0, self.config.max_tokens - len(input_tokens) - self.system_prompt_length - 50)
+        if max_tokens <= 0:
+            logger.warning(f"Prompt is too long. Max tokens is {self.config.max_tokens} but length of input tokens is {len(input_tokens)}.")
+            logger.warning(f"Prompt: {prompt}")
+            too_long = True
+            max_tokens = 0
+        payload = {
             "model": self.config.model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
             "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": max_tokens,
             "response_format": response_format,
         }
+        return payload, too_long
+
+    def _dump_payload_for_logging(self, payload: Dict[str, Any]) -> str:
+        try:
+            return orjson.dumps(payload, option=orjson.OPT_INDENT_2).decode("utf-8")
+        except orjson.JSONEncodeError:
+            return str(payload)
 
     def _run_vllm(
         self,
@@ -150,12 +209,21 @@ class StructuredLLMClient:
         if self.config.cache_raw_responses:
             ensure_dir(cache_path.parent)
         url = self.config.vllm_api_base.rstrip("/") + "/chat/completions"
-        payload = self._request_payload(rendered_prompt, response_format(prompt_key))
+        payload, too_long = self._request_payload(rendered_prompt, response_format(prompt_key))
+        if too_long:
+            return {}
 
+        max_attempts = max(1, retries)
         last_error: Optional[Exception] = None
-        for attempt in range(retries + 1):
+        for attempt in range(max_attempts):
+            attempt_num = attempt + 1
             try:
-                response = self.session.post(url, headers=self._headers(), json=payload, timeout=120)
+                response = self.session.post(
+                    url,
+                    headers=self._headers(),
+                    json=payload,
+                    timeout=self._TIMEOUT_SECONDS,
+                )
                 response.raise_for_status()
                 data = response.json()
                 content = data["choices"][0]["message"]["content"]
@@ -163,22 +231,57 @@ class StructuredLLMClient:
                     parsed = parse_json_response(content)
                 except (orjson.JSONDecodeError, ValueError) as exc:
                     last_error = exc
-                    logger.warning("Invalid JSON from %s attempt %d: %s", prompt_key, attempt + 1, exc)
-                    if attempt < retries:
+                    logger.warning("Invalid JSON from %s attempt %d: %s", prompt_key, attempt_num, exc)
+                    if attempt_num < max_attempts:
+                        wait = self._retry_backoff * attempt_num
+                        if wait > 0:
+                            logger.info("Retrying %s after %.1fs due to JSON parse error", prompt_key, wait)
+                            time.sleep(wait)
                         continue
-                    raise
+                    logger.error("Giving up on %s after %d attempts due to JSON parsing errors", prompt_key, max_attempts)
+                    return {}
                 if self.config.cache_raw_responses:
                     cache_path.write_bytes(orjson.dumps(parsed, option=orjson.OPT_INDENT_2))
                 return parsed
             except requests.RequestException as exc:
                 last_error = exc
-                logger.error("Request failed for %s: %s", prompt_key, exc)
-                if attempt < retries:
-                    continue
-                raise
+                logger.error(
+                    "Request failed for %s (attempt %d/%d): %s",
+                    prompt_key,
+                    attempt_num,
+                    max_attempts,
+                    exc,
+                )
+                if attempt_num >= max_attempts:
+                    try:
+                        payload_dump = orjson.dumps(payload, option=orjson.OPT_INDENT_2).decode("utf-8")
+                    except orjson.JSONEncodeError:
+                        payload_dump = str(payload)
+                    logger.error("Request payload for %s:\n%s", prompt_key, payload_dump)
+                    response_text: Optional[str] = None
+                    status_code: Optional[int] = None
+                    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+                        status_code = exc.response.status_code
+                        try:
+                            response_text = exc.response.text
+                        except Exception:
+                            response_text = None
+                    if response_text:
+                        logger.error(
+                            "Response body for %s (status %s):\\n%s",
+                            prompt_key,
+                            status_code,
+                            response_text,
+                        )
+                    return {}
+                wait = self._retry_backoff * attempt_num
+                if wait > 0:
+                    logger.info("Retrying %s after %.1fs due to request error", prompt_key, wait)
+                    time.sleep(wait)
+                continue
         if last_error:
-            raise last_error
-        raise RuntimeError("Failed to obtain response")
+            logger.error("Failed to obtain response for %s after %d attempts: %s", prompt_key, max_attempts, last_error)
+        return {}
 
     def _run_ollama(
         self,
@@ -192,7 +295,9 @@ class StructuredLLMClient:
         base_url = self.config.ollama_api_base or self.config.vllm_api_base or "http://localhost:11434"
         url = base_url.rstrip("/") + "/api/chat"
         user_prompt = (
-            f"{rendered_prompt}\n\nReturn ONLY valid JSON that matches this schema:\n{schema_text(prompt_key)}\n"
+            f"{rendered_prompt}\n\n"
+            "Return ONLY valid JSON that matches this schema:\n"
+            f"{schema_text(prompt_key)}\n"
             "Do not include any additional text."
         )
         payload = {
@@ -208,10 +313,17 @@ class StructuredLLMClient:
             },
         }
 
+        max_attempts = max(1, retries)
         last_error: Optional[Exception] = None
-        for attempt in range(retries + 1):
+        for attempt in range(max_attempts):
+            attempt_num = attempt + 1
             try:
-                response = self.session.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=120)
+                response = self.session.post(
+                    url,
+                    headers={"Content-Type": "application/json"},
+                    json=payload,
+                    timeout=self._TIMEOUT_SECONDS,
+                )
                 response.raise_for_status()
                 data = response.json()
                 # Ollama returns either 'message' or top-level 'response'
@@ -227,29 +339,314 @@ class StructuredLLMClient:
                     parsed = parse_json_response(content)
                 except (orjson.JSONDecodeError, ValueError) as exc:
                     last_error = exc
-                    logger.warning("Invalid JSON from Ollama for %s attempt %d: %s", prompt_key, attempt + 1, exc)
-                    if attempt < retries:
+                    logger.warning("Invalid JSON from Ollama for %s attempt %d: %s", prompt_key, attempt_num, exc)
+                    if attempt_num < max_attempts:
+                        wait = self._retry_backoff * attempt_num
+                        if wait > 0:
+                            logger.info("Retrying %s after %.1fs due to Ollama JSON error", prompt_key, wait)
+                            time.sleep(wait)
                         continue
-                    raise
+                    logger.error("Giving up on Ollama request %s after %d attempts due to JSON errors", prompt_key, max_attempts)
+                    return {}
                 if self.config.cache_raw_responses:
                     cache_path.write_bytes(orjson.dumps(parsed, option=orjson.OPT_INDENT_2))
                 return parsed
             except (requests.RequestException, ValueError) as exc:
                 last_error = exc
-                logger.error("Ollama request failed for %s: %s", prompt_key, exc)
-                if attempt < retries:
-                    continue
-                raise
+                logger.error(
+                    "Ollama request failed for %s (attempt %d/%d): %s",
+                    prompt_key,
+                    attempt_num,
+                    max_attempts,
+                    exc,
+                )
+                if attempt_num >= max_attempts:
+                    try:
+                        payload_dump = orjson.dumps(payload, option=orjson.OPT_INDENT_2).decode("utf-8")
+                    except orjson.JSONEncodeError:
+                        payload_dump = str(payload)
+                    logger.error("Ollama request payload for %s:\\n%s", prompt_key, payload_dump)
+                    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+                        try:
+                            response_text = exc.response.text
+                        except Exception:
+                            response_text = None
+                        if response_text:
+                            logger.error(
+                                "Ollama response body for %s (status %s):\\n%s",
+                                prompt_key,
+                                exc.response.status_code,
+                                response_text,
+                            )
+                    return {}
+                wait = self._retry_backoff * attempt_num
+                if wait > 0:
+                    logger.info("Retrying %s after %.1fs due to Ollama request error", prompt_key, wait)
+                    time.sleep(wait)
+                continue
         if last_error:
-            raise last_error
-        raise RuntimeError("Failed to obtain response")
+            logger.error("Failed to obtain Ollama response for %s after %d attempts: %s", prompt_key, max_attempts, last_error)
+        return {}
+
+    async def _run_vllm_async(
+        self,
+        http_client: httpx.AsyncClient,
+        prompt_key: str,
+        rendered_prompt: str,
+        cache_path: Path,
+        retries: int,
+    ) -> Dict[str, Any]:
+        if self.config.cache_raw_responses:
+            ensure_dir(cache_path.parent)
+        url = self.config.vllm_api_base.rstrip("/") + "/chat/completions"
+        payload, too_long = self._request_payload(rendered_prompt, response_format(prompt_key))
+        if too_long:
+            return {}
+
+        max_attempts = max(1, retries)
+        last_error: Optional[Exception] = None
+        for attempt in range(max_attempts):
+            attempt_num = attempt + 1
+            try:
+                response = await http_client.post(
+                    url,
+                    headers=self._headers(),
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+                content = data["choices"][0]["message"]["content"]
+                try:
+                    parsed = parse_json_response(content)
+                except (orjson.JSONDecodeError, ValueError) as exc:
+                    last_error = exc
+                    logger.warning("Invalid JSON from %s attempt %d: %s", prompt_key, attempt_num, exc)
+                    if attempt_num < max_attempts:
+                        wait = self._retry_backoff * attempt_num
+                        if wait > 0:
+                            logger.info("Retrying %s after %.1fs due to async JSON parse error", prompt_key, wait)
+                            await asyncio.sleep(wait)
+                        continue
+                    logger.error("Giving up on %s after %d attempts due to async JSON parsing errors", prompt_key, max_attempts)
+                    return {}
+                if self.config.cache_raw_responses:
+                    cache_path.write_bytes(orjson.dumps(parsed, option=orjson.OPT_INDENT_2))
+                return parsed
+            except httpx.HTTPError as exc:
+                last_error = exc
+                logger.error(
+                    "Async request failed for %s (attempt %d/%d): %s",
+                    prompt_key,
+                    attempt_num,
+                    max_attempts,
+                    exc,
+                )
+                if attempt_num >= max_attempts:
+                    payload_dump = self._dump_payload_for_logging(payload)
+                    logger.error("Request payload for %s:\n%s", prompt_key, payload_dump)
+                    response_text: Optional[str] = None
+                    status_code: Optional[int] = None
+                    if exc.response is not None:
+                        status_code = exc.response.status_code
+                        try:
+                            response_text = exc.response.text
+                        except Exception:
+                            response_text = None
+                    if response_text:
+                        logger.error(
+                            "Response body for %s (status %s):\\n%s",
+                            prompt_key,
+                            status_code,
+                            response_text,
+                        )
+                    logger.error("Giving up on %s after %d attempts due to async request errors", prompt_key, max_attempts)
+                    return {}
+                wait = self._retry_backoff * attempt_num
+                if wait > 0:
+                    logger.info("Retrying %s after %.1fs due to async request error", prompt_key, wait)
+                    await asyncio.sleep(wait)
+                continue
+        if last_error:
+            logger.error("Failed to obtain async response for %s after %d attempts: %s", prompt_key, max_attempts, last_error)
+        return {}
+
+    async def _run_ollama_async(
+        self,
+        http_client: httpx.AsyncClient,
+        prompt_key: str,
+        rendered_prompt: str,
+        cache_path: Path,
+        retries: int,
+    ) -> Dict[str, Any]:
+        if self.config.cache_raw_responses:
+            ensure_dir(cache_path.parent)
+        base_url = self.config.ollama_api_base or self.config.vllm_api_base or "http://localhost:11434"
+        url = base_url.rstrip("/") + "/api/chat"
+        user_prompt = (
+            f"{rendered_prompt}\n\n"
+            "Return ONLY valid JSON that matches this schema:\n"
+            f"{schema_text(prompt_key)}\n"
+            "Do not include any additional text."
+        )
+        payload = {
+            "model": self.config.model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": False,
+            "options": {
+                "temperature": self.config.temperature,
+                "num_predict": self.config.max_tokens,
+            },
+        }
+
+        max_attempts = max(1, retries)
+        last_error: Optional[Exception] = None
+        for attempt in range(max_attempts):
+            attempt_num = attempt + 1
+            try:
+                response = await http_client.post(
+                    url,
+                    headers={"Content-Type": "application/json"},
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+                content = ""
+                if isinstance(data, dict):
+                    if "message" in data and isinstance(data["message"], dict):
+                        content = data["message"].get("content", "")
+                    elif "response" in data:
+                        content = data.get("response", "")
+                if not content:
+                    raise ValueError(f"Ollama response missing content: {data}")
+                try:
+                    parsed = parse_json_response(content)
+                except (orjson.JSONDecodeError, ValueError) as exc:
+                    last_error = exc
+                    logger.warning("Invalid JSON from Ollama for %s attempt %d: %s", prompt_key, attempt_num, exc)
+                    if attempt_num < max_attempts:
+                        wait = self._retry_backoff * attempt_num
+                        if wait > 0:
+                            logger.info("Retrying %s after %.1fs due to async Ollama JSON error", prompt_key, wait)
+                            await asyncio.sleep(wait)
+                        continue
+                    logger.error("Giving up on Ollama request %s after %d attempts due to JSON errors", prompt_key, max_attempts)
+                    return {}
+                if self.config.cache_raw_responses:
+                    cache_path.write_bytes(orjson.dumps(parsed, option=orjson.OPT_INDENT_2))
+                return parsed
+            except (httpx.HTTPError, ValueError) as exc:
+                last_error = exc
+                logger.error(
+                    "Async Ollama request failed for %s (attempt %d/%d): %s",
+                    prompt_key,
+                    attempt_num,
+                    max_attempts,
+                    exc,
+                )
+                if attempt_num >= max_attempts:
+                    payload_dump = self._dump_payload_for_logging(payload)
+                    logger.error("Ollama request payload for %s:\\n%s", prompt_key, payload_dump)
+                    response_text: Optional[str] = None
+                    status_code: Optional[int] = None
+                    if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+                        status_code = exc.response.status_code
+                        try:
+                            response_text = exc.response.text
+                        except Exception:
+                            response_text = None
+                    if response_text:
+                        logger.error(
+                            "Ollama response body for %s (status %s):\\n%s",
+                            prompt_key,
+                            status_code,
+                            response_text,
+                        )
+                    logger.error("Giving up on Ollama request %s after %d attempts due to request errors", prompt_key, max_attempts)
+                    return {}
+                wait = self._retry_backoff * attempt_num
+                if wait > 0:
+                    logger.info("Retrying %s after %.1fs due to async Ollama request error", prompt_key, wait)
+                    await asyncio.sleep(wait)
+                continue
+        if last_error:
+            logger.error("Failed to obtain async Ollama response for %s after %d attempts: %s", prompt_key, max_attempts, last_error)
+        return {}
+    async def run_async(
+        self,
+        prompt_key: str,
+        rendered_prompt: str,
+        cache_path: Path,
+        retries: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        effective_retries = max(1, retries if retries is not None else self.config.llm_retries)
+        results = await self.run_many_async([(prompt_key, rendered_prompt, cache_path, effective_retries)])
+        if not results:
+            raise RuntimeError("run_async returned no results")
+        return results[0]
+
+    async def run_many_async(
+        self,
+        requests_to_run: Sequence[Tuple[str, str, Path, int]],
+    ) -> List[Dict[str, Any]]:
+        if not requests_to_run:
+            return []
+
+        results: List[Optional[Dict[str, Any]]] = [None] * len(requests_to_run)
+        pending: List[Tuple[int, str, str, Path, int]] = []
+
+        for idx, item in enumerate(requests_to_run):
+            if len(item) == 3:
+                prompt_key, rendered_prompt, cache_path = item
+                retries = self.config.llm_retries
+            else:
+                prompt_key, rendered_prompt, cache_path, retries = item
+            if self.config.skip_if_cached and cache_path.exists():
+                try:
+                    results[idx] = orjson.loads(cache_path.read_bytes())
+                    continue
+                except orjson.JSONDecodeError:
+                    logger.warning("Failed to parse cache %s, recomputing", cache_path)
+            pending.append((idx, prompt_key, rendered_prompt, cache_path, max(1, retries)))
+
+        if pending:
+            async with httpx.AsyncClient(timeout=self._TIMEOUT_SECONDS) as http_client:
+                if self.config.backend == "ollama":
+                    coroutines = [
+                        self._run_ollama_async(http_client, prompt_key, rendered_prompt, cache_path, retries)
+                        for (_, prompt_key, rendered_prompt, cache_path, retries) in pending
+                    ]
+                else:
+                    coroutines = [
+                        self._run_vllm_async(http_client, prompt_key, rendered_prompt, cache_path, retries)
+                        for (_, prompt_key, rendered_prompt, cache_path, retries) in pending
+                    ]
+                responses = await asyncio.gather(*coroutines)
+            for (idx, _, _, _, _), response in zip(pending, responses):
+                results[idx] = response
+
+        missing = [i for i, res in enumerate(results) if res is None]
+        if missing:
+            raise RuntimeError(f"Missing responses for request indices: {missing}")
+
+        return [cast(Dict[str, Any], res) for res in results]
+
+    def run_many(
+        self,
+        requests_to_run: Sequence[Tuple[str, str, Path, int]],
+    ) -> List[Dict[str, Any]]:
+        if not requests_to_run:
+            return []
+        return asyncio.run(self.run_many_async(requests_to_run))
 
     def run(
         self,
         prompt_key: str,
         rendered_prompt: str,
         cache_path: Path,
-        retries: int = 1,
+        retries: Optional[int] = None,
     ) -> Dict[str, Any]:
         if self.config.skip_if_cached and cache_path.exists():
             try:
@@ -257,9 +654,11 @@ class StructuredLLMClient:
             except orjson.JSONDecodeError:
                 logger.warning("Failed to parse cache %s, recomputing", cache_path)
 
+        effective_retries = max(1, retries if retries is not None else self.config.llm_retries)
+
         if self.config.backend == "ollama":
-            return self._run_ollama(prompt_key, rendered_prompt, cache_path, retries)
-        return self._run_vllm(prompt_key, rendered_prompt, cache_path, retries)
+            return self._run_ollama(prompt_key, rendered_prompt, cache_path, effective_retries)
+        return self._run_vllm(prompt_key, rendered_prompt, cache_path, effective_retries)
 
 
 def assign_source_id(
@@ -366,43 +765,86 @@ def process_db(
     config: Config,
     client: StructuredLLMClient,
     schema_path: Path,
+    out_path: Path,
     verbose: bool = False,
 ) -> None:
     db_stem = db_path.stem.replace(".db", "")
-    out_root = config.out_root / db_stem
+    out_root = Path(out_path) / db_stem
     ensure_dir(out_root)
     writer = OutputWriter(out_root / "analysis.db", schema_path)
     cache_enabled = config.cache_raw_responses
 
     try:
-        article_iter = iter_articles(str(db_path))
+        article_counts = list(iter_article_counts(str(db_path)))
+        if not article_counts:
+            logger.info("Database %s contains no entries; skipping", db_path)
+            return
+
+        valid_entry_ids: List[int] = []
+        for entry_id, version_count in article_counts:
+            if version_count < config.min_versions:
+                logger.info(
+                    "Skipping entry %s during pre-filter: only %d version(s) < min_versions=%d",
+                    entry_id,
+                    version_count,
+                    config.min_versions,
+                )
+                continue
+            if config.max_versions is not None and version_count >= config.max_versions:
+                logger.info(
+                    "Skipping entry %s during pre-filter: %d version(s) exceeds max_versions=%d",
+                    entry_id,
+                    version_count,
+                    config.max_versions,
+                )
+                continue
+            valid_entry_ids.append(entry_id)
+
+        filtered_out = len(article_counts) - len(valid_entry_ids)
+        if filtered_out:
+            logger.info("Pre-filtered %d of %d entries in %s based on version thresholds (min=%d, max=%s)", filtered_out, len(article_counts), db_path.name, config.min_versions, str(config.max_versions))
+
+        if not valid_entry_ids:
+            logger.info(
+                "No articles in %s meet version count filters (min_versions=%d, max_versions=%s); skipping database",
+                db_path.name,
+                config.min_versions,
+                str(config.max_versions),
+            )
+            return
+
         iterator = tqdm(
-            article_iter,
+            valid_entry_ids,
+            total=len(valid_entry_ids),
             desc=f"{db_stem} articles",
             unit="article",
             leave=False,
-            disable=not sys.stdout.isatty(),
+            dynamic_ncols=True,
+            mininterval=0.1,
+            smoothing=0.1,
+            disable=False,
         )
         try:
             for entry_id in iterator:
                 versions = load_versions(str(db_path), entry_id)
                 if not versions:
+                    logger.info("Skipping entry %s: no versions returned from loader", entry_id)
                     continue
 
-                num_versions = len(versions)
-                if num_versions < config.min_versions:
-                    if verbose:
-                        logger.debug("Skipping entry %s: only %d version(s)", entry_id, num_versions)
-                    continue
-                if config.max_versions is not None and num_versions >= config.max_versions:
-                    if verbose:
-                        logger.debug(
-                            "Skipping entry %s: %d versions exceeds max %s",
+                similarity_threshold = config.skip_similarity_threshold
+                if len(versions) >= 2 and similarity_threshold is not None and similarity_threshold > 0:
+                    first_text = versions[0].get("summary") or ""
+                    final_text = versions[-1].get("summary") or ""
+                    similarity = text_jaccard_similarity(first_text, final_text)
+                    if similarity >= similarity_threshold:
+                        logger.info(
+                            "Skipping entry %s: high similarity between first and final versions "
+                            "(Jaccard=%.3f, threshold=%.3f)",
                             entry_id,
-                            num_versions,
-                            config.max_versions,
+                            similarity,
+                            similarity_threshold,
                         )
-                    continue
+                        continue
 
                 article_dir = out_root / str(entry_id)
                 if cache_enabled:
@@ -422,7 +864,7 @@ def process_db(
                 pair_rows: List[Tuple[Any, ...]] = []
                 pair_sources_added: List[Tuple[Any, ...]] = []
                 pair_sources_removed: List[Tuple[Any, ...]] = []
-                pair_title_events: List[Tuple[Any, ...]] = []
+                pair_source_transitions: List[Tuple[Any, ...]] = []
                 pair_replacements: List[Tuple[Any, ...]] = []
                 pair_numeric: List[Tuple[Any, ...]] = []
                 pair_claims_rows: List[Tuple[Any, ...]] = []
@@ -436,7 +878,12 @@ def process_db(
                 versions_rows: List[Tuple[Any, ...]] = []
                 version_payloads: Dict[str, Dict[str, str]] = {}
 
+                live_blog_checked = False
+                skip_article_due_to_live_blog = False
+
                 for version in versions:
+                    if skip_article_due_to_live_blog:
+                        break
                     version_id = version["id"]
                     version_num = normalize_version_number(version["version"])
                     version_dir = article_dir / f"v{version_num:03d}"
@@ -446,11 +893,35 @@ def process_db(
                     text = version.get("summary") or ""
                     title = version.get("title") or ""
 
-                    seg = segment(text)
+                    version_payloads.setdefault(version_id, {})
+
+                    if not live_blog_checked:
+                        rendered_d4 = render_prompt(
+                            load_prompt_template("D4_live_blog_detect"),
+                            {"version_text": text},
+                        )
+                        d4_result = client.run(
+                            "D4_live_blog_detect",
+                            rendered_d4,
+                            version_dir / "D4_live_blog_detect.json",
+                        )
+                        d4_result = prune_low_confidence(d4_result, config.accept_confidence_min)
+                        version_payloads[version_id]["live_blog"] = orjson.dumps(
+                            d4_result,
+                            option=orjson.OPT_INDENT_2,
+                        ).decode("utf-8")
+                        if d4_result.get("is_live_blog"):
+                            live_blog_flag = True
+                            skip_article_due_to_live_blog = True
+                            logger.info("Article %s flagged as live blog; skipping remaining processing", entry_id)
+                            break
+                        live_blog_checked = True
+
+                    seg = segment(text, config.spacy_model)
                     lede = extract_lede(title, text, seg["paragraphs"])
                     ledes[version_num] = lede
 
-                    entity_doc = ner_entities_spacy(text)
+                    entity_doc = ner_entities_spacy(text, config.spacy_model)
                     for ent in entity_doc.get("entities", []):
                         entity_id = assign_entity_id(ent["canonical"], entity_registry)
                         sentence_index = find_index_by_offset(seg["sentences"], ent.get("char_start", -1))
@@ -561,32 +1032,45 @@ def process_db(
                         enriched["prominence"] = prominence
                         processed_mentions.append(enriched)
 
-                    source_catalog_for_prompt = [
-                        {
-                            "index": idx,
-                            "surface": catalog_item.get("surface"),
-                            "canonical": catalog_item.get("canonical"),
-                            "type": catalog_item.get("type"),
-                            "speech_style": catalog_item.get("speech_style"),
-                            "attribution_verb": catalog_item.get("attribution_verb"),
-                            "char_start": catalog_item.get("char_start", -1),
-                            "char_end": catalog_item.get("char_end", -1),
-                            "sentence_index": catalog_item.get("sentence_index", -1),
-                            "paragraph_index": catalog_item.get("paragraph_index", -1),
-                            "confidence": catalog_item.get("confidence"),
-                        }
-                        for idx, catalog_item in enumerate(processed_mentions, start=1)
-                    ]
+                    source_catalog_for_prompt: List[Dict[str, Any]] = []
+                    for idx, catalog_item in enumerate(processed_mentions, start=1):
+                        prompt_source_id = f"source_{idx:03d}"
+                        catalog_item["_prompt_source_id"] = prompt_source_id
+                        source_catalog_for_prompt.append(
+                            {
+                                "source_id": prompt_source_id,
+                                "index": idx,
+                                "surface": catalog_item.get("surface"),
+                                "canonical": catalog_item.get("canonical"),
+                                "type": catalog_item.get("type"),
+                                "speech_style": catalog_item.get("speech_style"),
+                                "attribution_verb": catalog_item.get("attribution_verb"),
+                                "char_start": catalog_item.get("char_start", -1),
+                                "char_end": catalog_item.get("char_end", -1),
+                                "sentence_index": catalog_item.get("sentence_index", -1),
+                                "paragraph_index": catalog_item.get("paragraph_index", -1),
+                                "confidence": catalog_item.get("confidence"),
+                            }
+                        )
                     source_catalog_json = orjson.dumps(
                         source_catalog_for_prompt,
                         option=orjson.OPT_INDENT_2,
                     ).decode("utf-8")
 
-                    version_payloads.setdefault(version_id, {})
                     version_payloads[version_id]["source_catalog"] = source_catalog_json
 
-                    mentions: List[Dict[str, Any]] = []
+                    batch_entries: List[Dict[str, Any]] = []
+                    batch_requests: List[Tuple[str, str, Path, int]] = []
+                    mention_lookup: Dict[str, Dict[str, Any]] = {}
+                    batch_index = 1
+
                     for idx, mention in enumerate(processed_mentions, start=1):
+                        prompt_source_id = mention.get("_prompt_source_id")
+                        if not prompt_source_id:
+                            prompt_source_id = f"source_{idx:03d}"
+                            mention["_prompt_source_id"] = prompt_source_id
+                        mention_lookup[prompt_source_id] = mention
+
                         span_start = mention.get("char_start", -1)
                         span_end = mention.get("char_end", span_start)
                         if span_start is None or span_start < 0:
@@ -603,7 +1087,7 @@ def process_db(
                             config.hedge_window_tokens,
                         )
                         target_source_payload = {
-                            "index": idx,
+                            "source_id": prompt_source_id,
                             "surface": mention.get("surface"),
                             "canonical": mention.get("canonical"),
                             "type": mention.get("type"),
@@ -614,30 +1098,168 @@ def process_db(
                             "sentence_index": mention.get("sentence_index", -1),
                             "paragraph_index": mention.get("paragraph_index", -1),
                         }
-                        target_source_json = orjson.dumps(
-                            target_source_payload,
-                            option=orjson.OPT_INDENT_2,
-                        ).decode("utf-8")
-                        rendered_a2 = render_prompt(
-                            load_prompt_template("A2_hedge_window"),
+                        batch_entries.append(
                             {
+                                "source_id": prompt_source_id,
                                 "context_window_text": context_window,
-                                "target_source": target_source_json,
-                                "source_catalog": source_catalog_json,
-                            },
+                                "target_source": target_source_payload,
+                            }
                         )
-                        a2_result = client.run(
-                            "A2_hedge_window",
-                            rendered_a2,
-                            version_dir / f"A2_hedge_{idx:03d}.json",
-                        )
-                        a2_result = prune_low_confidence(a2_result, config.accept_confidence_min)
-                        mention["hedge_analysis"] = a2_result
-                        mention["doubted"] = a2_result.get("stance_toward_source") == "skeptical"
-                        mention["hedge_count"] = a2_result.get("hedge_count", 0)
+
+                        if len(batch_entries) == HEDGE_WINDOW_BATCH_SIZE or idx == len(processed_mentions):
+                            target_sources_json = orjson.dumps(
+                                batch_entries,
+                                option=orjson.OPT_INDENT_2,
+                            ).decode("utf-8")
+                            rendered_a2 = render_prompt(
+                                load_prompt_template("A2_hedge_window"),
+                                {
+                                    "target_sources": target_sources_json,
+                                    "source_catalog": source_catalog_json,
+                                },
+                            )
+                            cache_path = version_dir / f"A2_hedge_batch_{batch_index:03d}.json"
+                            batch_requests.append(("A2_hedge_window", rendered_a2, cache_path, self.config.llm_retries))
+                            batch_entries = []
+                            batch_index += 1
+
+                    a2_responses: List[Dict[str, Any]] = []
+                    if batch_requests:
+                        a2_responses = client.run_many(batch_requests)
+                        if len(a2_responses) != len(batch_requests):
+                            raise RuntimeError(
+                                f"Expected {len(batch_requests)} A2 responses but received {len(a2_responses)}"
+                            )
+
+                    for a2_raw in a2_responses:
+                        a2_result = prune_low_confidence(a2_raw, config.accept_confidence_min)
+                        for source_result in a2_result.get("sources", []):
+                            source_key = source_result.get("source_id")
+                            if not source_key:
+                                continue
+                            mention = mention_lookup.get(source_key)
+                            if not mention:
+                                continue
+                            mention["hedge_analysis"] = source_result
+                            mention["doubted"] = source_result.get("stance_toward_source") == "skeptical"
+                            mention["hedge_count"] = source_result.get("hedge_count", 0)
+
+                    roles_result: Dict[str, Any] = {}
+                    if processed_mentions:
+                        target_sources_for_prompts = []
+                        for mention in processed_mentions:
+                            prompt_source_id = mention.get("_prompt_source_id")
+                            if not prompt_source_id:
+                                continue
+                            target_sources_for_prompts.append(
+                                {
+                                    "source_id": prompt_source_id,
+                                    "name": mention.get("canonical") or mention.get("surface") or "",
+                                    "surface": mention.get("surface"),
+                                    "attributed_text": mention.get("attributed_text"),
+                                    "sentence_index": mention.get("sentence_index"),
+                                    "paragraph_index": mention.get("paragraph_index"),
+                                }
+                            )
+
+                        if target_sources_for_prompts:
+                            target_sources_json = orjson.dumps(
+                                target_sources_for_prompts,
+                                option=orjson.OPT_INDENT_2,
+                            ).decode("utf-8")
+
+                            roles_rendered = render_prompt(
+                                load_prompt_template("N1_narrative_keywords"),
+                                {
+                                    "news_article": text,
+                                    "target_sources": target_sources_json,
+                                },
+                            )
+
+                            roles_result = client.run(
+                                "N1_narrative_keywords",
+                                roles_rendered,
+                                version_dir / "N1_narrative_keywords.json",
+                            )
+
+                            roles_result = prune_low_confidence(roles_result, config.accept_confidence_min)
+
+                            roles_lookup = {
+                                item.get("source_id"): item
+                                for item in roles_result.get("sources", [])
+                                if item.get("source_id")
+                            }
+
+                            for mention in processed_mentions:
+                                prompt_source_id = mention.get("_prompt_source_id")
+                                if not prompt_source_id:
+                                    continue
+                                roles_entry = roles_lookup.get(prompt_source_id)
+                                if roles_entry:
+                                    mention["narrative_function"] = roles_entry.get("narrative_function")
+                                    perspectives = roles_entry.get("perspective") or []
+                                    if isinstance(perspectives, list):
+                                        mention["perspective"] = perspectives
+                                    else:
+                                        mention["perspective"] = [str(perspectives)]
+                                    mention["centrality"] = roles_entry.get("centrality")
+
+                            version_payloads[version_id]["source_roles"] = orjson.dumps(
+                                roles_result,
+                                option=orjson.OPT_INDENT_2,
+                            ).decode("utf-8")
+
+                    mentions: List[Dict[str, Any]] = []
+                    anonymous_words = 0
+                    total_attributed_words = 0
+                    institutional_words = 0
+                    hedge_total = 0
+                    distinct_source_ids = set()
+                    institutional_types = {"government", "corporate", "law_enforcement"}
+
+                    for mention in processed_mentions:
+                        if "hedge_analysis" not in mention:
+                            mention["hedge_analysis"] = {}
+                        mention["doubted"] = bool(mention.get("doubted", False))
+                        hedge_count_val = mention.get("hedge_count", 0)
+                        try:
+                            mention["hedge_count"] = int(hedge_count_val)
+                        except (TypeError, ValueError):
+                            mention["hedge_count"] = 0
+
+                        mention.pop("_prompt_source_id", None)
+
+                        is_anonymous = bool(mention.get("is_anonymous"))
+                        mention["is_anonymous"] = is_anonymous
+                        anonymous_description = (mention.get("anonymous_description") or "").strip()
+                        anonymous_domain = (mention.get("anonymous_domain") or "unknown").lower()
+                        if anonymous_domain not in {"government", "corporate", "law_enforcement", "individual", "unknown"}:
+                            anonymous_domain = "unknown"
+                        mention["anonymous_description"] = anonymous_description
+                        mention["anonymous_domain"] = anonymous_domain
+                        evidence_type = (mention.get("evidence_type") or "other").lower()
+                        if evidence_type not in {"official_statement", "press_release", "eyewitness", "document", "statistic", "prior_reporting", "social_media", "court_filing", "other"}:
+                            evidence_type = "other"
+                        evidence_text = mention.get("evidence_text") or mention.get("attributed_text") or ""
+                        mention["evidence_type"] = evidence_type
+                        mention["evidence_text"] = evidence_text
 
                         source_id = assign_source_id(mention, source_registry)
                         mention["source_id_within_article"] = source_id
+
+                        attributed_text = mention.get("attributed_text") or ""
+                        words = len(attributed_text.split())
+                        total_attributed_words += words
+                        if mention.get("type") in institutional_types:
+                            institutional_words += words
+                        hedge_total += mention.get("hedge_count", 0)
+                        if is_anonymous:
+                            if attributed_text:
+                                anonymous_words += len(attributed_text.split())
+                            elif anonymous_description:
+                                anonymous_words += len(anonymous_description.split())
+                        if source_id:
+                            distinct_source_ids.add(source_id)
 
                         source_mentions_records.append(
                             (
@@ -655,7 +1277,12 @@ def process_db(
                                 mention.get("paragraph_index"),
                                 int(mention.get("is_in_title", False)),
                                 int(mention.get("is_in_lede", False)),
-                                mention.get("attributed_text"),
+                                attributed_text,
+                                int(is_anonymous),
+                                anonymous_description,
+                                anonymous_domain,
+                                evidence_type,
+                                evidence_text,
                                 mention["prominence"]["lead_percentile"],
                                 mention.get("confidence", 5),
                             )
@@ -668,73 +1295,61 @@ def process_db(
                     ).decode("utf-8")
                     version_payloads[version_id]["source_mentions"] = mentions_json
 
-                    d1 = client.run(
-                        "D1_anonymous_sources",
-                        render_prompt(
-                            load_prompt_template("D1_anonymous_sources"),
-                            {"version_text": text, "source_catalog": source_catalog_json},
-                        ),
-                        version_dir / "D1_anonymous_sources.json",
+                    classifier_specs: List[Tuple[str, str, Path, int]] = []
+                    if "correction" in text.lower():
+                        classifier_specs.append(
+                            (
+                                "D3_corrections",
+                                render_prompt(load_prompt_template("D3_corrections"), {"version_text": text}),
+                                version_dir / "D3_corrections.json",
+                                self.config.llm_retries,
+                            )
+                        )
+                    classifier_specs.append(
+                        (
+                            "B1_version_summary_sources",
+                            render_prompt(
+                                load_prompt_template("B1_version_summary_sources"),
+                                {
+                                    "version_id": version_id,
+                                    "version_text": text,
+                                    "source_mentions": mentions_json,
+                                },
+                            ),
+                            version_dir / "B1_version_summary_sources.json",
+                            self.config.llm_retries,
+                        )
                     )
-                    d2 = client.run(
-                        "D2_evidence_types",
-                        render_prompt(
-                            load_prompt_template("D2_evidence_types"),
-                            {"version_text": text, "source_mentions": mentions_json},
-                        ),
-                        version_dir / "D2_evidence_types.json",
-                    )
-                    d3 = client.run(
-                        "D3_corrections",
-                        render_prompt(load_prompt_template("D3_corrections"), {"version_text": text}),
-                        version_dir / "D3_corrections.json",
-                    )
-                    d4 = client.run(
-                        "D4_live_blog_detect",
-                        render_prompt(load_prompt_template("D4_live_blog_detect"), {"version_text": text}),
-                        version_dir / "D4_live_blog_detect.json",
-                    )
-                    b1 = client.run(
-                        "B1_version_summary_sources",
-                        render_prompt(
-                            load_prompt_template("B1_version_summary_sources"),
-                            {
-                                "version_id": version_id,
-                                "version_text": text,
-                                "source_mentions": mentions_json,
-                            },
-                        ),
-                        version_dir / "B1_version_summary_sources.json",
-                    )
-                    c1 = client.run(
-                        "C1_protest_frame_cues",
-                        render_prompt(load_prompt_template("C1_protest_frame_cues"), {"version_text": text}),
-                        version_dir / "C1_protest_frame_cues.json",
+                    classifier_specs.append(
+                        (
+                            "C1_protest_frame_cues",
+                            render_prompt(load_prompt_template("C1_protest_frame_cues"), {"version_text": text}),
+                            version_dir / "C1_protest_frame_cues.json",
+                            self.config.llm_retries,
+                        )
                     )
 
-                    d1 = prune_low_confidence(d1, config.accept_confidence_min)
-                    d2 = prune_low_confidence(d2, config.accept_confidence_min)
-                    d3 = prune_low_confidence(d3, config.accept_confidence_min)
-                    d4 = prune_low_confidence(d4, config.accept_confidence_min)
-                    b1 = prune_low_confidence(b1, config.accept_confidence_min)
-                    c1 = prune_low_confidence(c1, config.accept_confidence_min)
+                    classifier_outputs: Dict[str, Dict[str, Any]] = {}
+                    if classifier_specs:
+                        classifier_results = client.run_many(classifier_specs)
+                        if len(classifier_results) != len(classifier_specs):
+                            raise RuntimeError(
+                                f"Expected {len(classifier_specs)} classifier responses but received {len(classifier_results)}"
+                            )
+                        classifier_outputs = {
+                            key: prune_low_confidence(result, config.accept_confidence_min)
+                            for (key, _, _, _), result in zip(classifier_specs, classifier_results)
+                        }
 
-                    version_payloads[version_id]["anonymous"] = orjson.dumps(
-                        d1,
-                        option=orjson.OPT_INDENT_2,
-                    ).decode("utf-8")
-                    version_payloads[version_id]["evidence"] = orjson.dumps(
-                        d2,
-                        option=orjson.OPT_INDENT_2,
-                    ).decode("utf-8")
-                    version_payloads[version_id]["corrections"] = orjson.dumps(
-                        d3,
-                        option=orjson.OPT_INDENT_2,
-                    ).decode("utf-8")
-                    version_payloads[version_id]["live_blog"] = orjson.dumps(
-                        d4,
-                        option=orjson.OPT_INDENT_2,
-                    ).decode("utf-8")
+                    d3 = classifier_outputs.get("D3_corrections", {})
+                    b1 = classifier_outputs.get("B1_version_summary_sources", {})
+                    c1 = classifier_outputs.get("C1_protest_frame_cues", {})
+
+                    if d3:
+                        version_payloads[version_id]["corrections"] = orjson.dumps(
+                            d3,
+                            option=orjson.OPT_INDENT_2,
+                        ).decode("utf-8")
                     version_payloads[version_id]["protest"] = orjson.dumps(
                         c1,
                         option=orjson.OPT_INDENT_2,
@@ -743,45 +1358,6 @@ def process_db(
                         b1,
                         option=orjson.OPT_INDENT_2,
                     ).decode("utf-8")
-
-                    total_attributed_words = 0
-                    institutional_words = 0
-                    hedge_total = 0
-                    distinct_source_ids = set()
-                    institutional_types = {"government", "corporate", "law_enforcement"}
-                    for mention in mentions:
-                        source_id = mention.get("source_id_within_article")
-                        if source_id:
-                            distinct_source_ids.add(source_id)
-                        attributed_text = mention.get("attributed_text") or ""
-                        words = len(attributed_text.split())
-                        total_attributed_words += words
-                        if mention.get("type") in institutional_types:
-                            institutional_words += words
-                        hedge_total += mention.get("hedge_count", 0)
-
-                    anonymous_words = 0
-                    for anon in d1.get("anonymous_mentions", []):
-                        snippet = anon.get("verbatim_text") or ""
-                        if snippet:
-                            anonymous_words += len(snippet.split())
-                            continue
-                        start = anon.get("char_start", 0) or 0
-                        end = anon.get("char_end", start) or start
-                        if not isinstance(start, int):
-                            try:
-                                start = int(start)
-                            except (TypeError, ValueError):
-                                start = 0
-                        if not isinstance(end, int):
-                            try:
-                                end = int(end)
-                            except (TypeError, ValueError):
-                                end = start
-                        start = max(0, start)
-                        end = max(start, end)
-                        span = text[start:end]
-                        anonymous_words += len(span.split())
 
                     token_count = max(len(seg["tokens"]), 1)
                     total_attributed_words = max(total_attributed_words, 0)
@@ -799,9 +1375,6 @@ def process_db(
                         "anonymous_source_share_words": anonymous_share,
                         "hedge_density_per_1k_tokens": hedge_density,
                     }
-
-                    if d4.get("is_live_blog"):
-                        live_blog_flag = True
 
                     version_meta.append(
                         {
@@ -831,6 +1404,7 @@ def process_db(
                             seg["char_len"],
                         )
                     )
+
                     version_metrics_rows.append(
                         (
                             version_id,
@@ -843,6 +1417,37 @@ def process_db(
                         )
                     )
 
+            if skip_article_due_to_live_blog:
+                versions_rows = [
+                    (
+                        ver["id"],
+                        entry_id,
+                        news_org,
+                        normalize_version_number(ver["version"]),
+                        ver.get("created"),
+                        ver.get("title"),
+                        len(ver.get("summary") or ""),
+                    )
+                    for ver in versions
+                ]
+
+                upsert_article(
+                    writer,
+                    (
+                        entry_id,
+                        news_org,
+                        url,
+                        title_first,
+                        title_final,
+                        original_ts,
+                        len(versions) - 1,
+                        1,
+                    ),
+                )
+                upsert_versions(writer, versions_rows)
+                writer.commit()
+                logger.info("Recorded live-blog metadata for article %s and skipped pairwise processing", entry_id)
+            else:
                 for prev, curr in zip(versions, versions[1:]):
                     prev_id = prev["id"]
                     curr_id = curr["id"]
@@ -858,7 +1463,6 @@ def process_db(
                     curr_title = curr.get("title") or ""
 
                     diff_stats = compute_diff_magnitude(prev_text, curr_text)
-                    alignment = align_sentences(prev_text, curr_text)
                     delta_minutes = inter_update_timing(prev.get("created"), curr.get("created"))
                     title_jacc_prev = jaccard_title_body(
                         prev_title,
@@ -873,8 +1477,6 @@ def process_db(
                     curr_payload = version_payloads.get(curr_id, {})
                     prev_sources_json = prev_payload.get("source_mentions", "[]")
                     curr_sources_json = curr_payload.get("source_mentions", "[]")
-                    prev_anonymous_json = prev_payload.get("anonymous", '{"anonymous_mentions": []}')
-                    curr_anonymous_json = curr_payload.get("anonymous", '{"anonymous_mentions": []}')
                     prev_protest_json = prev_payload.get("protest", '{"frame_cues": [], "roles": [], "confidence": 1}')
                     curr_protest_json = curr_payload.get("protest", '{"frame_cues": [], "roles": [], "confidence": 1}')
 
@@ -887,21 +1489,11 @@ def process_db(
                             "prev_source_mentions": prev_sources_json,
                             "curr_source_mentions": curr_sources_json,
                         },
-                        "P2_title_events_pair": {
-                            "title_prev": prev_title,
-                            "title_curr": curr_title,
-                            "v_prev": prev_text,
-                            "v_curr": curr_text,
-                            "prev_source_mentions": prev_sources_json,
-                            "curr_source_mentions": curr_sources_json,
-                        },
                         "P3_anon_named_replacement_pair": {
                             "v_prev": prev_text,
                             "v_curr": curr_text,
                             "prev_source_mentions": prev_sources_json,
                             "curr_source_mentions": curr_sources_json,
-                            "prev_anonymous": prev_anonymous_json,
-                            "curr_anonymous": curr_anonymous_json,
                         },
                         "P4_verb_strength_pair": {
                             "v_prev": prev_text,
@@ -939,27 +1531,52 @@ def process_db(
                             "prev_source_mentions": prev_sources_json,
                             "curr_source_mentions": curr_sources_json,
                         },
-                        "P17_title_body_alignment_pair": {
-                            "title_prev": prev_title,
-                            "title_curr": curr_title,
-                            "v_prev_first_paragraph": ledes[prev_num]["text"] if prev_num in ledes else "",
-                            "v_curr_first_paragraph": ledes[curr_num]["text"] if curr_num in ledes else "",
-                        },
                         "D5_angle_change_pair": {
                             "prev_version_text": prev_text,
                             "curr_version_text": curr_text,
+                            "prev_title": prev_title,
+                            "curr_title": curr_title,
+                            "prev_lede": ledes[prev_num]["text"] if prev_num in ledes else "",
+                            "curr_lede": ledes[curr_num]["text"] if curr_num in ledes else "",
+                            "prev_source_mentions": prev_sources_json,
+                            "curr_source_mentions": curr_sources_json,
                         },
                     }
 
-                    results: Dict[str, Dict[str, Any]] = {}
+                    pair_specs: List[Tuple[str, str, Path, int]] = []
                     for key, variables in pair_prompts.items():
                         rendered = render_prompt(load_prompt_template(key), variables)
-                        result = client.run(key, rendered, pair_dir / f"{key}.json")
-                        results[key] = prune_low_confidence(result, config.accept_confidence_min)
+                        pair_specs.append((key, rendered, pair_dir / f"{key}.json", self.config.llm_retries))
+                    pair_results = client.run_many(pair_specs)
+                    if len(pair_results) != len(pair_specs):
+                        raise RuntimeError(
+                            f"Expected {len(pair_specs)} pair responses but received {len(pair_results)}"
+                        )
+                    results: Dict[str, Dict[str, Any]] = {
+                        key: prune_low_confidence(result, config.accept_confidence_min)
+                        for (key, _, _, _), result in zip(pair_specs, pair_results)
+                    }
 
                     a3 = results["A3_edit_type_pair"]
                     p10 = results["P10_movement_pair"]
                     d5 = results["D5_angle_change_pair"]
+
+                    movement_up = p10.get("upweighted_summary", "")
+                    movement_down = p10.get("downweighted_summary", "")
+                    movement_notes_parts: List[str] = []
+                    for shift in p10.get("notable_shifts", []) or []:
+                        direction = shift.get("direction")
+                        snippet = shift.get("snippet")
+                        explanation = shift.get("explanation")
+                        pieces = [piece for piece in [direction, f'"{snippet}"' if snippet else None, explanation] if piece]
+                        if pieces:
+                            movement_notes_parts.append(" - ".join(pieces))
+                    movement_notes = "; ".join(movement_notes_parts)
+
+                    angle_changed_flag = int(bool(d5.get("angle_changed", False)))
+                    angle_category = d5.get("angle_change_category", "no_change")
+                    angle_summary = d5.get("angle_summary", "")
+                    title_alignment_notes = d5.get("title_alignment_notes", "")
 
                     pair_rows.append(
                         (
@@ -973,10 +1590,14 @@ def process_db(
                             diff_stats.get("tokens_added", 0),
                             diff_stats.get("tokens_deleted", 0),
                             diff_stats.get("percent_text_new", 0.0),
-                            p10.get("movement_index", alignment.get("movement_index", 0.0)),
-                            p10.get("moved_into_top20pct_tokens", 0.0),
+                            movement_up,
+                            movement_down,
+                            movement_notes,
                             a3.get("edit_type"),
-                            int(d5.get("angle_changed", False)),
+                            angle_changed_flag,
+                            angle_category,
+                            angle_summary,
+                            title_alignment_notes,
                             title_jacc_prev,
                             title_jacc_curr,
                         )
@@ -986,10 +1607,17 @@ def process_db(
                         pair_sources_added.append((prev_id, curr_id, src.get("canonical"), src.get("type")))
                     for src in a3.get("sources_removed", []):
                         pair_sources_removed.append((prev_id, curr_id, src.get("canonical"), src.get("type")))
-                    for event in results["P2_title_events_pair"].get("title_events", []):
-                        pair_title_events.append((prev_id, curr_id, event.get("canonical"), event.get("event")))
-                    for event in results["P2_title_events_pair"].get("lede_events", []):
-                        pair_title_events.append((prev_id, curr_id, event.get("canonical"), event.get("event")))
+                    for transition in d5.get("source_transitions", []) or []:
+                        pair_source_transitions.append(
+                            (
+                                prev_id,
+                                curr_id,
+                                transition.get("canonical"),
+                                transition.get("transition_type"),
+                                transition.get("reason_category"),
+                                transition.get("reason_detail"),
+                            )
+                        )
                     for repl in results["P3_anon_named_replacement_pair"].get("replacements", []):
                         pair_replacements.append(
                             (
@@ -1040,115 +1668,119 @@ def process_db(
                             )
                         )
 
-                if not version_numeric_metrics:
-                    continue
 
-                first_version_num = min(version_numeric_metrics.keys())
-                final_version_num = max(version_numeric_metrics.keys())
+                if version_numeric_metrics:
+                    first_version_num = min(version_numeric_metrics.keys())
+                    final_version_num = max(version_numeric_metrics.keys())
 
-                b2_result = client.run(
-                    "B2_first_final_framing_compare",
-                    render_prompt(
-                        load_prompt_template("B2_first_final_framing_compare"),
-                        {
-                            "title_v0": versions[0]["title"],
-                            "lede_v0": ledes.get(first_version_num, {}).get("text", ""),
-                            "title_vf": versions[-1]["title"],
-                            "lede_vf": ledes.get(final_version_num, {}).get("text", ""),
-                        },
-                    ),
-                    article_dir / "B2_first_final_framing_compare.json",
-                )
-                b2_result = prune_low_confidence(b2_result, config.accept_confidence_min)
-
-                agg = aggregate_sources_over_versions(source_mentions_by_version, version_meta)
-
-                metrics_first = version_numeric_metrics.get(first_version_num, {})
-                metrics_final = version_numeric_metrics.get(final_version_num, {})
-                bias = final_version_bias(metrics_first, metrics_final)
-                distinct_delta = metrics_final.get("distinct_sources", 0) - metrics_first.get("distinct_sources", 0)
-                anonymity_delta = metrics_final.get("anonymous_source_share_words", 0.0) - metrics_first.get(
-                    "anonymous_source_share_words", 0.0
-                )
-                hedge_delta = metrics_final.get("hedge_density_per_1k_tokens", 0.0) - metrics_first.get(
-                    "hedge_density_per_1k_tokens", 0.0
-                )
-
-                upsert_article(
-                    writer,
-                    (
-                        entry_id,
-                        news_org,
-                        url,
-                        title_first,
-                        title_final,
-                        original_ts,
-                        len(versions) - 1,
-                        int(live_blog_flag),
-                    ),
-                )
-
-                upsert_versions(writer, versions_rows)
-                insert_source_mentions(writer, source_mentions_records)
-
-                sources_agg_rows = [
-                    (
-                        entry_id,
-                        news_org,
-                        src.get("source_id_within_article"),
-                        src.get("source_canonical"),
-                        src.get("source_type"),
-                        src.get("first_seen_version"),
-                        src.get("first_seen_time"),
-                        src.get("last_seen_version"),
-                        src.get("last_seen_time"),
-                        src.get("num_mentions_total"),
-                        src.get("num_versions_present"),
-                        src.get("total_attributed_words"),
-                        src.get("voice_retention_index"),
-                        src.get("mean_prominence"),
-                        src.get("lead_appearance_count"),
-                        src.get("title_appearance_count"),
-                        int(src.get("doubted_any", False)),
-                        int(src.get("deemphasized_any", False)),
-                        int(src.get("disappeared_any", False)),
+                    b2_result = client.run(
+                        "B2_first_final_framing_compare",
+                        render_prompt(
+                            load_prompt_template("B2_first_final_framing_compare"),
+                            {
+                                "title_v0": versions[0]["title"],
+                                "lede_v0": ledes.get(first_version_num, {}).get("text", ""),
+                                "title_vf": versions[-1]["title"],
+                                "lede_vf": ledes.get(final_version_num, {}).get("text", ""),
+                            },
+                        ),
+                        article_dir / "B2_first_final_framing_compare.json",
                     )
-                    for src in agg.get("sources", [])
-                ]
+                    b2_result = prune_low_confidence(b2_result, config.accept_confidence_min)
 
-                upsert_sources_agg(writer, sources_agg_rows)
-                insert_entity_mentions(writer, entity_rows)
-                insert_version_metrics(writer, version_metrics_rows)
-                insert_version_pairs(writer, pair_rows)
-                insert_pair_sources_added(writer, pair_sources_added)
-                insert_pair_sources_removed(writer, pair_sources_removed)
-                insert_pair_title_events(writer, pair_title_events)
-                insert_pair_replacements(writer, pair_replacements)
-                insert_pair_numeric_changes(writer, pair_numeric)
-                insert_pair_claims(writer, pair_claims_rows)
-                insert_pair_cues(writer, pair_cues_rows)
+                    agg = aggregate_sources_over_versions(source_mentions_by_version, version_meta)
 
-                upsert_article_metrics(
-                    writer,
-                    (
+                    metrics_first = version_numeric_metrics.get(first_version_num, {})
+                    metrics_final = version_numeric_metrics.get(final_version_num, {})
+                    bias = final_version_bias(metrics_first, metrics_final)
+                    distinct_delta = metrics_final.get("distinct_sources", 0) - metrics_first.get("distinct_sources", 0)
+                    anonymity_delta = metrics_final.get("anonymous_source_share_words", 0.0) - metrics_first.get(
+                        "anonymous_source_share_words", 0.0
+                    )
+                    hedge_delta = metrics_final.get("hedge_density_per_1k_tokens", 0.0) - metrics_first.get(
+                        "hedge_density_per_1k_tokens", 0.0
+                    )
+
+                    upsert_article(
+                        writer,
+                        (
+                            entry_id,
+                            news_org,
+                            url,
+                            title_first,
+                            title_final,
+                            original_ts,
+                            len(versions) - 1,
+                            int(live_blog_flag),
+                        ),
+                    )
+
+                    upsert_versions(writer, versions_rows)
+                    insert_source_mentions(writer, source_mentions_records)
+
+                    sources_agg_rows = [
+                        (
+                            entry_id,
+                            news_org,
+                            src.get("source_id_within_article"),
+                            src.get("source_canonical"),
+                            src.get("source_type"),
+                            src.get("first_seen_version"),
+                            src.get("first_seen_time"),
+                            src.get("last_seen_version"),
+                            src.get("last_seen_time"),
+                            src.get("num_mentions_total"),
+                            src.get("num_versions_present"),
+                            src.get("total_attributed_words"),
+                            src.get("voice_retention_index"),
+                            src.get("mean_prominence"),
+                            src.get("lead_appearance_count"),
+                            src.get("title_appearance_count"),
+                            int(src.get("doubted_any", False)),
+                            int(src.get("deemphasized_any", False)),
+                            int(src.get("disappeared_any", False)),
+                        )
+                        for src in agg.get("sources", [])
+                    ]
+
+                    upsert_sources_agg(writer, sources_agg_rows)
+                    insert_entity_mentions(writer, entity_rows)
+                    insert_version_metrics(writer, version_metrics_rows)
+                    insert_version_pairs(writer, pair_rows)
+                    insert_pair_sources_added(writer, pair_sources_added)
+                    insert_pair_sources_removed(writer, pair_sources_removed)
+                    insert_pair_source_transitions(writer, pair_source_transitions)
+                    insert_pair_replacements(writer, pair_replacements)
+                    insert_pair_numeric_changes(writer, pair_numeric)
+                    insert_pair_claims(writer, pair_claims_rows)
+                    insert_pair_cues(writer, pair_cues_rows)
+
+                    upsert_article_metrics(
+                        writer,
+                        (
+                            entry_id,
+                            news_org,
+                            bias.get("overstate_institutional_share", 0.0),
+                            distinct_delta,
+                            anonymity_delta,
+                            hedge_delta,
+                        ),
+                    )
+
+                    writer.commit()
+                    if verbose:
+                        logger.debug("Committed article %s (%d versions)", entry_id, num_versions)
+                    logger.info("Processed article %s in %s", entry_id, db_path.name)
+                    if config.cleanup_cached_dirs and cache_enabled:
+                        try:
+                            shutil.rmtree(article_dir)
+                        except OSError:
+                            logger.warning("Failed to remove cache directory %s", article_dir)
+                else:
+                    logger.info(
+                        "Skipping article %s after processing: no version metrics were generated; likely no usable source mentions",
                         entry_id,
-                        news_org,
-                        bias.get("overstate_institutional_share", 0.0),
-                        distinct_delta,
-                        anonymity_delta,
-                        hedge_delta,
-                    ),
-                )
-
-                writer.commit()
-                if verbose:
-                    logger.debug("Committed article %s (%d versions)", entry_id, num_versions)
-                logger.info("Processed article %s in %s", entry_id, db_path.name)
-                if config.cleanup_cached_dirs and cache_enabled:
-                    try:
-                        shutil.rmtree(article_dir)
-                    except OSError:
-                        logger.warning("Failed to remove cache directory %s", article_dir)
+                    )
         finally:
             if hasattr(iterator, "close"):
                 iterator.close()
@@ -1162,6 +1794,7 @@ def main() -> None:
     parser.add_argument("--db", action="append", dest="dbs", required=True, type=Path)
     parser.add_argument("--schema", default=Path(__file__).with_name("schema_out.sql"), type=Path)
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--out-path", default="./out", type=Path)
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -1175,7 +1808,7 @@ def main() -> None:
 
     for db_path in args.dbs:
         logger.info("Processing %s", db_path)
-        process_db(db_path, config, client, args.schema, verbose=args.verbose)
+        process_db(db_path, config, client, args.schema, args.out_path, verbose=args.verbose)
 
 
 if __name__ == "__main__":

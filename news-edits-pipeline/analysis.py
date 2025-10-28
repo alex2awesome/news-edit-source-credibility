@@ -17,14 +17,17 @@ from canonicalize import fuzzy_match_source, normalize_source
 
 
 @lru_cache(maxsize=1)
-def _get_nlp():
+def _get_nlp(spacy_model: str):
     """Load spaCy model once."""
     try:
-        return spacy.load("en_core_web_sm")
+        return spacy.load(spacy_model)
     except OSError as exc:  # pragma: no cover - environment specific
-        raise RuntimeError(
-            "spaCy model 'en_core_web_sm' is not installed. Run 'python -m spacy download en_core_web_sm'."
-        ) from exc
+        try:
+            spacy.cli.download(spacy_model)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to download spaCy model '{spacy_model}'. Please download it manually and try again."
+            ) from exc
 
 
 _PARAGRAPH_SEP_RE = re.compile(r"(?:\n\s*\n|<p>|</p>)")
@@ -47,9 +50,9 @@ def _split_paragraphs(text: str) -> List[Dict]:
     return paragraphs
 
 
-def segment(text: str) -> Dict:
+def segment(text: str, spacy_model: str) -> Dict:
     """Return sentence, paragraph, token segmentation with char offsets."""
-    doc = _get_nlp()(text)
+    doc = _get_nlp(spacy_model)(text)
     sentences = [
         {"start": sent.start_char, "end": sent.end_char, "text": sent.text, "index": i}
         for i, sent in enumerate(doc.sents)
@@ -91,9 +94,9 @@ def compute_prominence_features(char_start: int, char_len: int, in_title: bool, 
     }
 
 
-def ner_entities_spacy(text: str) -> Dict:
+def ner_entities_spacy(text: str, spacy_model: str) -> Dict:
     """Extract entities using spaCy with canonical forms."""
-    doc = _get_nlp()(text)
+    doc = _get_nlp(spacy_model)(text)
     entities = []
     for ent in doc.ents:
         entities.append(
@@ -108,10 +111,10 @@ def ner_entities_spacy(text: str) -> Dict:
     return {"entities": entities}
 
 
-def align_sentences(prev_text: str, curr_text: str) -> Dict:
+def align_sentences(prev_text: str, curr_text: str, spacy_model: str) -> Dict:
     """Align sentences using TF-IDF cosine similarity and measure movement."""
-    prev_doc = _get_nlp()(prev_text)
-    curr_doc = _get_nlp()(curr_text)
+    prev_doc = _get_nlp(spacy_model)(prev_text)
+    curr_doc = _get_nlp(spacy_model)(curr_text)
     prev_sentences = [sent.text for sent in prev_doc.sents]
     curr_sentences = [sent.text for sent in curr_doc.sents]
 

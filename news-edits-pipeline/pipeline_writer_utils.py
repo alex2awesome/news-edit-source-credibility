@@ -39,8 +39,9 @@ def insert_source_mentions(writer: OutputWriter, rows: Rows) -> None:
             version_id, article_id, news_org, source_id_within_article,
             source_canonical, source_type, speech_style, attribution_verb,
             char_start, char_end, sentence_index, paragraph_index,
-            is_in_title, is_in_lede, attributed_text, prominence_lead_pct, confidence
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            is_in_title, is_in_lede, attributed_text, is_anonymous, anonymous_description,
+            anonymous_domain, evidence_type, evidence_text, prominence_lead_pct, confidence
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         list(rows),
     )
@@ -77,7 +78,7 @@ def insert_entity_mentions(writer: OutputWriter, rows: Rows) -> None:
 def insert_version_metrics(writer: OutputWriter, rows: Rows) -> None:
     writer.executemany(
         """
-        INSERT INTO version_metrics (
+        INSERT OR REPLACE INTO version_metrics (
             version_id, article_id, news_org, distinct_sources,
             institutional_share_words, anonymous_source_share_words,
             hedge_density_per_1k
@@ -93,10 +94,11 @@ def insert_version_pairs(writer: OutputWriter, rows: Rows) -> None:
         INSERT INTO version_pairs (
             article_id, news_org, from_version_id, to_version_id,
             from_version_num, to_version_num, delta_minutes, tokens_added,
-            tokens_deleted, percent_text_new, movement_index,
-            moved_into_top20pct_tokens, edit_type, angle_changed,
+            tokens_deleted, percent_text_new, movement_upweighted_summary,
+            movement_downweighted_summary, movement_notes, edit_type, angle_changed,
+            angle_change_category, angle_summary, title_alignment_notes,
             title_jaccard_prev, title_jaccard_curr
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         list(rows),
     )
@@ -110,8 +112,8 @@ def insert_pair_sources_removed(writer: OutputWriter, rows: Rows) -> None:
     writer.executemany("INSERT INTO pair_sources_removed VALUES (?, ?, ?, ?)", list(rows))
 
 
-def insert_pair_title_events(writer: OutputWriter, rows: Rows) -> None:
-    writer.executemany("INSERT INTO pair_title_events VALUES (?, ?, ?, ?)", list(rows))
+def insert_pair_source_transitions(writer: OutputWriter, rows: Rows) -> None:
+    writer.executemany("INSERT INTO pair_source_transitions VALUES (?, ?, ?, ?, ?, ?)", list(rows))
 
 
 def insert_pair_replacements(writer: OutputWriter, rows: Rows) -> None:

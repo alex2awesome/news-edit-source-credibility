@@ -1,3 +1,4 @@
+torch
 vllm>=0.5
 openai>=1.40
 tiktoken
@@ -14,3 +15,4 @@ PyYAML
 requests
 jsonschema
 tqdm
+httpx

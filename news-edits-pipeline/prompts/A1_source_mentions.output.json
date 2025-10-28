@@ -58,6 +58,39 @@
           "attributed_text": {
             "type": "string"
           },
+          "is_anonymous": {
+            "type": "boolean"
+          },
+          "anonymous_description": {
+            "type": "string"
+          },
+          "anonymous_domain": {
+            "type": "string",
+            "enum": [
+              "government",
+              "corporate",
+              "law_enforcement",
+              "individual",
+              "unknown"
+            ]
+          },
+          "evidence_type": {
+            "type": "string",
+            "enum": [
+              "official_statement",
+              "press_release",
+              "eyewitness",
+              "document",
+              "statistic",
+              "prior_reporting",
+              "social_media",
+              "court_filing",
+              "other"
+            ]
+          },
+          "evidence_text": {
+            "type": "string"
+          },
           "confidence": {
             "type": "integer",
             "minimum": 1,
@@ -71,6 +104,11 @@
           "speech_style",
           "attribution_verb",
           "attributed_text",
+          "is_anonymous",
+          "anonymous_description",
+          "anonymous_domain",
+          "evidence_type",
+          "evidence_text",
           "confidence"
         ]
       }

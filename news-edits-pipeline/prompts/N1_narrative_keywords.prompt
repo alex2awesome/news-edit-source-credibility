@@ -1,0 +1,73 @@
+Diagnose each source’s narrative role, perspective, and centrality within this article. Please analyse every listed source and assign the requested descriptors grounded in the text.
+<rules>
+- Work source-by-source using the supplied `source_id` to keep identities aligned.
+- For each source, copy their name exactly in the `name` field.
+- Provide a narrative keyword label in Title Case (e.g., `Counterpoint`, `Victim`, `Expert Context`) that captures the source’s role, followed by a short explanation in the format `"LABEL": description`.
+- Assign `perspective` as a list containing any labels that apply from ["Authoritative", "Informative", "Supportive", "Skeptical", "Against", "Neutral"].
+- Set `centrality` to "High", "Medium", or "Low" depending on how essential the source is to the story’s main throughline.
+- Ground your reasoning in the article text; do not invent facts.
+- Return ONLY valid JSON matching the schema.
+</rules>
+
+<examples>
+Example 1:
+{
+  "sources": [
+    {
+      "source_id": "source_001",
+      "name": "Match Group",
+      "narrative_function": "\"Counterpoint\": This source is used to compare to the main actor in the news article and provide grounding.",
+      "perspective": ["Informative"],
+      "centrality": "Medium"
+    }
+  ]
+}
+
+Example 2:
+{
+  "sources": [
+    {
+      "source_id": "source_002",
+      "name": "Dubai Airshow",
+      "narrative_function": "\"More Context\": This source is used to further expand the context offered and offer a visual setting.",
+      "perspective": ["Neutral"],
+      "centrality": "Low"
+    }
+  ]
+}
+
+Example 3:
+{
+  "sources": [
+    {
+      "source_id": "source_003",
+      "name": "Ann Gough",
+      "narrative_function": "\"Victim\": This source provides the voice of a user for the product, giving us a personal view of the harm caused by the event.",
+      "perspective": ["Supportive"],
+      "centrality": "High"
+    }
+  ]
+}
+</examples>
+
+<json_output>
+{
+  "sources": [
+    {
+      "source_id": "source_001",
+      "name": "Example Name",
+      "narrative_function": "\"Label\": Explanation of why the source appears in the story.",
+      "perspective": ["Informative"],
+      "centrality": "High"
+    }
+  ]
+}
+</json_output>
+
+<article>
+{{news_article}}
+</article>
+
+<target_sources>
+{{target_sources}}
+</target_sources>

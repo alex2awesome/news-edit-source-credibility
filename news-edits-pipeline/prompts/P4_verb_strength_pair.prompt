@@ -1,15 +1,20 @@
-Evaluate changes in attribution verb strength for each continuing source. Please help me evaluate how attribution verb strength changes for recurring sources between these versions.
+Evaluate shifts in attribution verb tone for each continuing source. Please help me evaluate how the verbs describing each recurring source change in intensity or sentiment between these versions.
 <rules>
 - Compare verbs that describe how the source communicated (e.g., “said”, “insisted”, “blasted”).
 - Use the canonical `prev_source_mentions` and `curr_source_mentions` lists to align sources and retrieve verb/context details.
-- `strength_delta` ranges from -1.0 (weaker) to +1.0 (stronger). Use 0.0 when unchanged or unclear.
+- Assign a qualitative category for the shift using the provided taxonomy instead of numeric scores.
+- Provide a short note highlighting the most illustrative verb changes or contextual cues.
 - Return ONLY valid JSON matching the schema.
 </rules>
 
 <labels>
-by_source.strength_delta.positive: Values above 0 indicate the later verbs imply greater force, certainty, or intensity.
-by_source.strength_delta.zero: A value of 0 indicates comparable verb strength across versions or insufficient evidence to judge.
-by_source.strength_delta.negative: Values below 0 indicate the later verbs are weaker, more tentative, or less forceful.
+verb_tone_shift.intense_negative: Later verbs convey much stronger skepticism, hostility, or alarm.
+verb_tone_shift.medium_negative: Later verbs are somewhat more critical, skeptical, or tentative.
+verb_tone_shift.neutral: Verb strength and sentiment remain comparable.
+verb_tone_shift.medium_positive: Later verbs are somewhat more confident, supportive, or assertive.
+verb_tone_shift.intense_positive: Later verbs convey much stronger certainty, praise, or calls to action.
+verb_tone_shift.mixed: The verb profile shifts in both positive and negative directions.
+verb_tone_shift.unclear: Insufficient evidence to judge a meaningful shift.
 </labels>
 
 <examples>
@@ -37,7 +42,8 @@ Example 1 Output:
       "canonical": "Dana Cho",
       "prev_verbs": ["blasted", "insisted"],
       "curr_verbs": ["said", "noted"],
-      "strength_delta": -0.5
+      "verb_tone_shift": "medium_negative",
+      "notes": "Current verbs are calmer (“said”, “noted”) compared with the earlier forceful verbs (“blasted”, “insisted”)."
     }
   ]
 }
@@ -46,7 +52,13 @@ Example 1 Output:
 <json_output>
 {
   "by_source":[
-    {"canonical":"...", "prev_verbs":["say"], "curr_verbs":["confirm"], "strength_delta": 0.0}
+    {
+      "canonical":"Example Name",
+      "prev_verbs":["say"],
+      "curr_verbs":["confirm"],
+      "verb_tone_shift":"neutral",
+      "notes":"Brief explanation of the comparison."
+    }
   ]
 }
 </json_output>

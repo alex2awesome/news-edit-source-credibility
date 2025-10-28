@@ -5,23 +5,66 @@
     "angle_changed": {
       "type": "boolean"
     },
-    "old_angle": {
-      "type": "string"
-    },
-    "new_angle": {
-      "type": "string"
-    },
-    "change_type": {
+    "angle_change_category": {
       "type": "string",
       "enum": [
-        "who",
-        "what",
-        "why",
-        "responsibility",
-        "impact",
-        "blame",
-        "unclear"
+        "no_change",
+        "focus_shift",
+        "new_information",
+        "tone_shift",
+        "responsibility_shift",
+        "impact_emphasis",
+        "stat_update",
+        "source_reframing",
+        "other"
       ]
+    },
+    "angle_summary": {
+      "type": "string"
+    },
+    "title_alignment_notes": {
+      "type": "string"
+    },
+    "source_transitions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "canonical": {
+            "type": "string"
+          },
+          "transition_type": {
+            "type": "string",
+            "enum": [
+              "added",
+              "removed",
+              "promoted",
+              "demoted"
+            ]
+          },
+          "reason_category": {
+            "type": "string",
+            "enum": [
+              "new_actor",
+              "escalation",
+              "context_clarification",
+              "accountability",
+              "audience_need",
+              "other"
+            ]
+          },
+          "reason_detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "canonical",
+          "transition_type",
+          "reason_category",
+          "reason_detail"
+        ]
+      }
     },
     "evidence_snippets": {
       "type": "array",
@@ -37,9 +80,10 @@
   },
   "required": [
     "angle_changed",
-    "old_angle",
-    "new_angle",
-    "change_type",
+    "angle_change_category",
+    "angle_summary",
+    "title_alignment_notes",
+    "source_transitions",
     "evidence_snippets",
     "confidence"
   ]

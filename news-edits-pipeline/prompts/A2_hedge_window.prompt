@@ -1,9 +1,9 @@
-You assess hedging, doubt, or distancing language in a small excerpt surrounding a source attribution. Please help me evaluate hedging, doubt, or distancing language within the provided excerpt, focusing on the specified source mention.
+You assess hedging, doubt, or distancing language in small excerpts surrounding source attributions. Please help me evaluate the hedging profile for each target source supplied below.
 <rules>
-Consider modal verbs, adverbs, lexical hedges, and disclaimers. Follow instructions:
-- Evaluate only the supplied window; do not infer from missing context.
-- Anchor on the `target_source` metadata to ensure the analysis corresponds to the correct mention.
-- Use the canonical source catalog to resolve duplicates or aliases when needed.
+Consider modal verbs, adverbs, lexical hedges, and disclaimers.
+- Evaluate only the supplied context for each entry in `target_sources`; do not infer from missing text.
+- Use the `source_id` field to align your analysis with the correct mention and retain the same identifier in the output.
+- Reference the canonical source catalog when helpful to resolve duplicate or alias names.
 - Populate lists with unique lowercase tokens/phrases in appearance order.
 - Count hedges conservatively; avoid double-counting the same token.
 - `stance_toward_source` captures how the narrator frames the source’s credibility.
@@ -20,26 +20,30 @@ stance_toward_source.unclear: The available language does not reveal a stance to
 
 <examples>
 Example 1 Input:
-Window:
-City emergency managers reportedly warned that the levee "could buckle overnight," according to the briefing memo.
-
-Target source:
-{
-  "index": 1,
-  "surface": "City emergency managers",
-  "canonical": "City emergency managers",
-  "type": "government",
-  "speech_style": "mixed",
-  "attribution_verb": "warned",
-  "char_start": 0,
-  "char_end": 26,
-  "sentence_index": 0,
-  "paragraph_index": 0
-}
+Target sources:
+[
+  {
+    "source_id": "source_001",
+    "context_window_text": "City emergency managers reportedly warned that the levee \"could buckle overnight,\" according to the briefing memo.",
+    "target_source": {
+      "source_id": "source_001",
+      "surface": "City emergency managers",
+      "canonical": "City emergency managers",
+      "type": "government",
+      "speech_style": "mixed",
+      "attribution_verb": "warned",
+      "char_start": 0,
+      "char_end": 26,
+      "sentence_index": 0,
+      "paragraph_index": 0
+    }
+  }
+]
 
 Source catalog:
 [
   {
+    "source_id": "source_001",
     "index": 1,
     "surface": "City emergency managers",
     "canonical": "City emergency managers",
@@ -54,33 +58,38 @@ Source catalog:
 
 Example 1 Output:
 {
-  "hedge_markers": ["reportedly"],
-  "hedge_count": 1,
-  "epistemic_verbs": ["could"],
-  "stance_toward_source": "skeptical",
-  "confidence": 4
+  "sources": [
+    {
+      "source_id": "source_001",
+      "hedge_markers": ["reportedly"],
+      "hedge_count": 1,
+      "epistemic_verbs": ["could"],
+      "stance_toward_source": "skeptical",
+      "confidence": 4
+    }
+  ]
 }
 </examples>
 
 <json_output>
 {
-  "hedge_markers": ["reportedly","allegedly"],
-  "hedge_count": 0,
-  "epistemic_verbs": [],
-  "stance_toward_source": "supportive|neutral|skeptical|unclear",
-  "confidence": 1
+  "sources": [
+    {
+      "source_id": "source_001",
+      "hedge_markers": ["reportedly","allegedly"],
+      "hedge_count": 0,
+      "epistemic_verbs": [],
+      "stance_toward_source": "supportive|neutral|skeptical|unclear",
+      "confidence": 1
+    }
+  ]
 }
 </json_output>
 
-<article>
-Window:
-{{context_window_text}}
-</article>
+<target_sources>
+{{target_sources}}
+</target_sources>
 
-<target_source>
-{{target_source}}
-</target_source>
-
-<sources>
+<source_catalog>
 {{source_catalog}}
-</sources>
+</source_catalog>

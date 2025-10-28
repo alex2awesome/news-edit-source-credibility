@@ -8,7 +8,7 @@ import shutil
 import sqlite3
 import tempfile
 from contextlib import contextmanager
-from typing import Dict, Generator, Iterable, List
+from typing import Dict, Generator, Iterable, List, Tuple
 
 
 @contextmanager
@@ -30,14 +30,33 @@ def _resolved_db_path(db_path: str) -> Iterable[str]:
         yield db_path
 
 
-def iter_articles(db_path: str) -> Generator[int, None, None]:
-    """Yield distinct entry_ids from the input SQLite database."""
+def iter_article_counts(db_path: str) -> Generator[Tuple[int, int], None, None]:
+    """Yield (entry_id, version_count) pairs for the input SQLite database."""
     with _resolved_db_path(db_path) as resolved:
         conn = sqlite3.connect(resolved)
         try:
-            cursor = conn.execute("SELECT DISTINCT entry_id FROM entryversion ORDER BY entry_id")
+            cursor = conn.execute(
+                """
+                SELECT entry_id, COUNT(*) AS version_count
+                FROM entryversion
+                GROUP BY entry_id
+                ORDER BY entry_id
+                """
+            )
             for row in cursor:
-                yield int(row[0])
+                yield int(row[0]), int(row[1])
+        finally:
+            conn.close()
+
+
+def count_articles(db_path: str) -> int:
+    """Return the total number of distinct entry_ids in the database."""
+    with _resolved_db_path(db_path) as resolved:
+        conn = sqlite3.connect(resolved)
+        try:
+            cursor = conn.execute("SELECT COUNT(DISTINCT entry_id) FROM entryversion")
+            row = cursor.fetchone()
+            return int(row[0] or 0)
         finally:
             conn.close()
 

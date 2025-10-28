@@ -1,0 +1,56 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "perspective": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "Authoritative",
+                "Informative",
+                "Supportive",
+                "Skeptical",
+                "Against",
+                "Neutral"
+              ]
+            }
+          },
+          "centrality": {
+            "type": "string",
+            "enum": [
+              "High",
+              "Medium",
+              "Low"
+            ]
+          },
+          "narrative_function": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "name",
+          "perspective",
+          "centrality",
+          "narrative_function"
+        ]
+      }
+    }
+  },
+  "required": [
+    "sources"
+  ]
+}

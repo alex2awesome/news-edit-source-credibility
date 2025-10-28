@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 import sqlite3
-import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import orjson
 
+
+logger = logging.getLogger(__name__)
 
 PROMPT_DIR = Path(__file__).parent / "prompts"
 JSON_ONLY_FOOTER = (
@@ -164,8 +167,11 @@ def parse_json_response(raw: str) -> Any:
         non_schema = [obj for obj, _ in candidates if not is_schema(obj)]
         if non_schema:
             return non_schema[-1]
-        raise ValueError("Model returned only schema definitions.")
-        raise
+        logger.warning("Model response contained only schema definitions; returning empty object.")
+        return {}
+    except Exception:  # pragma: no cover - defensive fallback
+        logger.exception("Failed to parse model response; returning empty object.")
+        return {}
 
 
 class OutputWriter:

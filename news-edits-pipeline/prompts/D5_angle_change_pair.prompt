@@ -1,21 +1,37 @@
-Judge whether the dominant angle of the story changed between versions. Please help me determine whether the dominant angle changes between these article versions.
+Judge how the dominant angle and emphasis of the story shift between versions, including changes in title/lede focus and promoted sources. Please analyse the narrative differences between these article versions.
 <rules>
-Angle refers to the central storyline and framing emphasis (key actors, causes, consequences).
-- Compare who is foregrounded, what event or impact is emphasized, and the framing verbs/adjectives.
-- If change_type is `"unclear"`, leave `old_angle` and `new_angle` empty strings.
+Angle refers to the central storyline, framing emphasis, and the actors or evidence highlighted.
+- Compare who is foregrounded, what information is emphasised, how the tone shifts, and how the title/lede reframes the story.
+- If the angle is unchanged, set `angle_change_category` to `"no_change"` and keep `angle_summary` concise.
+- Provide qualitative `title_alignment_notes` describing how the title and lede relationship evolves (do NOT compute similarity scores).
+- For `source_transitions`, note when key sources are added, removed, promoted, or demoted and categorise the rationale.
 - Provide short `evidence_snippets` copied verbatim from the relevant version(s); prepend "prev:" or "curr:" if helpful to distinguish sources.
 - Report `confidence` on a 1–5 scale (1 = very low, 5 = very high).
 - Return ONLY valid JSON matching the schema.
 </rules>
 
 <labels>
-change_type.who: The edit shifts attention to different actors or speakers.
-change_type.what: The edit introduces or foregrounds different events or actions.
-change_type.why: The edit reframes causal explanations or motivations.
-change_type.responsibility: The edit changes who is portrayed as accountable or to blame.
-change_type.impact: The edit reframes consequences or affected groups.
-change_type.blame: The edit adjusts explicit accusations or exonerations.
-change_type.unclear: The angle shift is uncertain or cannot be categorized confidently.
+angle_change_category.no_change: The dominant storyline and framing remain effectively the same.
+angle_change_category.focus_shift: Attention pivots to different protagonists, victims, or stakeholders.
+angle_change_category.new_information: New facts or developments drive the updated emphasis.
+angle_change_category.tone_shift: The article’s attitude or evaluative language changes significantly.
+angle_change_category.responsibility_shift: Accountability or blame is reassigned.
+angle_change_category.impact_emphasis: Consequences or affected communities become more central.
+angle_change_category.stat_update: Quantitative updates or data revisions drive the change.
+angle_change_category.source_reframing: A key source is reinterpreted or their statements are contextualised differently.
+angle_change_category.other: Any other notable form of change not covered above.
+
+source_transitions.transition_type.added: A source newly appears or becomes foregrounded.
+source_transitions.transition_type.removed: A previously highlighted source disappears or is deemphasised.
+source_transitions.transition_type.promoted: A recurring source gains prominence (e.g., elevated to title, lede, or headline quotes).
+source_transitions.transition_type.demoted: A recurring source loses prominence.
+
+source_transitions.reason_category.new_actor: A new stakeholder enters the story.
+source_transitions.reason_category.escalation: The story intensifies or stakes increase.
+source_transitions.reason_category.context_clarification: Editors add context or balance.
+source_transitions.reason_category.accountability: Editors emphasise responsibility or corrective framing.
+source_transitions.reason_category.audience_need: Editors surface practical or explanatory information for readers.
+source_transitions.reason_category.other: Any other rationale; elaborate in the detail.
 </labels>
 
 <examples>
@@ -29,9 +45,17 @@ Families of the derailment victims gathered at city hall demanding answers, accu
 Example 1 Output:
 {
   "angle_changed": true,
-  "old_angle": "Authorities probe mechanical failure in the derailment",
-  "new_angle": "Families blame transit agency for ignoring maintenance warnings",
-  "change_type": "responsibility",
+  "angle_change_category": "responsibility_shift",
+  "angle_summary": "Focus moves from investigators canvassing wreckage to victims demanding accountability from transit leaders.",
+  "title_alignment_notes": "Later version foregrounds the victims’ accusations, aligning the lede and headline around blame.",
+  "source_transitions": [
+    {
+      "canonical": "Families of derailment victims",
+      "transition_type": "promoted",
+      "reason_category": "accountability",
+      "reason_detail": "Victims’ demands replace investigators as the narrative centre."
+    }
+  ],
   "evidence_snippets": [
     "prev: Police investigators continued to map debris after Tuesday’s commuter train derailment, focusing on mechanical failure.",
     "curr: Families of the derailment victims gathered at city hall demanding answers, accusing the transit agency of ignoring maintenance warnings."
@@ -43,18 +67,44 @@ Example 1 Output:
 <json_output>
 {
   "angle_changed": false,
-  "old_angle": "",
-  "new_angle": "",
-  "change_type": "who|what|why|responsibility|impact|blame|unclear",
+  "angle_change_category": "no_change",
+  "angle_summary": "Concise description of the stable framing across both versions.",
+  "title_alignment_notes": "Explain any continuity or minor adjustments between title and lede.",
+  "source_transitions": [
+    {
+      "canonical": "Example Source",
+      "transition_type": "added|removed|promoted|demoted",
+      "reason_category": "new_actor|escalation|context_clarification|accountability|audience_need|other",
+      "reason_detail": "Short explanation of why the source’s prominence changed."
+    }
+  ],
   "evidence_snippets": ["copy short supporting phrases exactly"],
   "confidence": 1
 }
 </json_output>
 
 <article>
+Previous title:
+{{prev_title}}
+
+Current title:
+{{curr_title}}
+
+Previous lede:
+{{prev_lede}}
+
+Current lede:
+{{curr_lede}}
+
 prev_text:
 {{prev_version_text}}
 
 curr_text:
 {{curr_version_text}}
+
+prev_sources:
+{{prev_source_mentions}}
+
+curr_sources:
+{{curr_source_mentions}}
 </article>

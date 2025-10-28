@@ -2,45 +2,49 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "movement_index": {
-      "type": "number",
-      "minimum": -1.0,
-      "maximum": 1.0
+    "upweighted_summary": {
+      "type": "string"
     },
-    "moved_into_top20pct_tokens": {
-      "type": "number",
-      "minimum": 0.0,
-      "maximum": 1.0
+    "downweighted_summary": {
+      "type": "string"
     },
-    "examples": {
+    "notable_shifts": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "upweighted",
+              "downweighted"
+            ]
+          },
           "snippet": {
             "type": "string"
           },
-          "prev_para": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "curr_para": {
-            "type": "integer",
-            "minimum": 0
+          "explanation": {
+            "type": "string"
           }
         },
         "required": [
+          "direction",
           "snippet",
-          "prev_para",
-          "curr_para"
+          "explanation"
         ]
       }
+    },
+    "confidence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5
     }
   },
   "required": [
-    "movement_index",
-    "moved_into_top20pct_tokens",
-    "examples"
+    "upweighted_summary",
+    "downweighted_summary",
+    "notable_shifts",
+    "confidence"
   ]
 }

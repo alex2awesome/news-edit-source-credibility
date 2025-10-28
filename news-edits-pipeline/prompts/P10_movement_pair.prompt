@@ -1,29 +1,20 @@
-Estimate how content shifts position in the article (top vs. lower sections). Please help me estimate how content positioning changes between these article versions.
+Describe how editorial emphasis shifts between these versions. Please explain what material is upweighted or downweighted in the revised article.
 <rules>
-- Consider paragraph reordering or new paragraphs pushing content downward.
-- `movement_index` should be negative when content moves downward (later paragraphs) and positive when promoted upward. Use a normalized scale roughly between -1 and +1.
-- `moved_into_top20pct_tokens` approximates the percentage of newly introduced tokens located in the top 20% of the article by length.
-- Provide up to three illustrative `examples`.
+- Look for sections, themes, or details that gain or lose prominence (e.g., moved into the lede, trimmed, expanded, or reframed).
+- Summarise key material that is upweighted (more prominent) and downweighted (less prominent) using concise prose.
+- Provide at least one illustrative snippet for each direction when possible.
+- Avoid numeric scores; focus on qualitative descriptions grounded in the text.
 - Return ONLY valid JSON matching the schema.
 </rules>
 
-<labels>
-movement_index: Positive values indicate content moved closer to the top of the story, negative values reflect a drift downward.
-moved_into_top20pct_tokens: Fraction of newly introduced tokens appearing in the top fifth of the article by length.
-examples.snippet: Short excerpt demonstrating a representative move in placement.
-examples.prev_para: Paragraph index where the snippet resided previously (0-based; -1 if absent).
-examples.curr_para: Paragraph index where the snippet appears in the current version (0-based; -1 if absent).
-</labels>
-
-<examples>
-Example: Paragraph describing "background investigation" moves from prev_para 5 to curr_para 2 after editors promote context. → movement_index positive (e.g., 0.4), moved_into_top20pct_tokens around 0.3, examples entry {"snippet":"background investigation","prev_para":5,"curr_para":2}.
-</examples>
-
 <json_output>
 {
-  "movement_index": 0.0,
-  "moved_into_top20pct_tokens": 0.0,
-  "examples":[{"snippet":"...", "prev_para":0, "curr_para":0}]
+  "upweighted_summary": "Describe the material that receives greater emphasis.",
+  "downweighted_summary": "Describe material that is trimmed or relegated.",
+  "notable_shifts": [
+    {"direction":"upweighted|downweighted", "snippet":"short quote or paraphrase", "explanation":"brief reason this matters"}
+  ],
+  "confidence": 1
 }
 </json_output>
 

@@ -2,42 +2,58 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "hedge_markers": {
+    "sources": {
       "type": "array",
       "items": {
-        "type": "string"
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "hedge_markers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "hedge_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "epistemic_verbs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stance_toward_source": {
+            "type": "string",
+            "enum": [
+              "supportive",
+              "neutral",
+              "skeptical",
+              "unclear"
+            ]
+          },
+          "confidence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          }
+        },
+        "required": [
+          "source_id",
+          "hedge_markers",
+          "hedge_count",
+          "epistemic_verbs",
+          "stance_toward_source",
+          "confidence"
+        ]
       }
-    },
-    "hedge_count": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "epistemic_verbs": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "stance_toward_source": {
-      "type": "string",
-      "enum": [
-        "supportive",
-        "neutral",
-        "skeptical",
-        "unclear"
-      ]
-    },
-  "confidence": {
-    "type": "integer",
-    "minimum": 1,
-    "maximum": 5
-  }
+    }
   },
   "required": [
-    "hedge_markers",
-    "hedge_count",
-    "epistemic_verbs",
-    "stance_toward_source",
-    "confidence"
+    "sources"
   ]
 }

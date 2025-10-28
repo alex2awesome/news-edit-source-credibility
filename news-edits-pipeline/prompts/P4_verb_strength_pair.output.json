@@ -23,17 +23,28 @@
               "type": "string"
             }
           },
-          "strength_delta": {
-            "type": "number",
-            "minimum": -1.0,
-            "maximum": 1.0
+          "verb_tone_shift": {
+            "type": "string",
+            "enum": [
+              "intense_negative",
+              "medium_negative",
+              "neutral",
+              "medium_positive",
+              "intense_positive",
+              "mixed",
+              "unclear"
+            ]
+          },
+          "notes": {
+            "type": "string"
           }
         },
         "required": [
           "canonical",
           "prev_verbs",
           "curr_verbs",
-          "strength_delta"
+          "verb_tone_shift",
+          "notes"
         ]
       }
     }

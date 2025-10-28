@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS source_mentions (
   is_in_title INTEGER,
   is_in_lede INTEGER,
   attributed_text TEXT,
+  is_anonymous INTEGER,
+  anonymous_description TEXT,
+  anonymous_domain TEXT,
+  evidence_type TEXT,
+  evidence_text TEXT,
   prominence_lead_pct REAL,
   confidence REAL
 );
@@ -89,10 +94,14 @@ CREATE TABLE IF NOT EXISTS version_pairs (
   tokens_added INTEGER,
   tokens_deleted INTEGER,
   percent_text_new REAL,
-  movement_index REAL,
-  moved_into_top20pct_tokens REAL,
+  movement_upweighted_summary TEXT,
+  movement_downweighted_summary TEXT,
+  movement_notes TEXT,
   edit_type TEXT,
   angle_changed INTEGER,
+  angle_change_category TEXT,
+  angle_summary TEXT,
+  title_alignment_notes TEXT,
   title_jaccard_prev REAL,
   title_jaccard_curr REAL
 );
@@ -111,11 +120,13 @@ CREATE TABLE IF NOT EXISTS pair_sources_removed (
   type TEXT
 );
 
-CREATE TABLE IF NOT EXISTS pair_title_events (
+CREATE TABLE IF NOT EXISTS pair_source_transitions (
   from_version_id TEXT,
   to_version_id TEXT,
   canonical TEXT,
-  event TEXT
+  transition_type TEXT,
+  reason_category TEXT,
+  reason_detail TEXT
 );
 
 CREATE TABLE IF NOT EXISTS pair_anon_named_replacements (
