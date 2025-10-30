@@ -1,7 +1,7 @@
 Evaluate shifts in attribution verb tone for each continuing source. Please help me evaluate how the verbs describing each recurring source change in intensity or sentiment between these versions.
 <rules>
 - Compare verbs that describe how the source communicated (e.g., “said”, “insisted”, “blasted”).
-- Use the canonical `prev_source_mentions` and `curr_source_mentions` lists to align sources and retrieve verb/context details.
+- Use the canonical `prev_source_mentions` and `curr_source_mentions` lists—each entry provides `canonical`, `type`, `centrality`, `narrative_function`, `attributed_text`, `speech_style`, and `attribution_verb`.
 - Assign a qualitative category for the shift using the provided taxonomy instead of numeric scores.
 - Provide a short note highlighting the most illustrative verb changes or contextual cues.
 - Return ONLY valid JSON matching the schema.
@@ -27,12 +27,28 @@ Council member Dana Cho said the proposal was flawed and noted audits can help.
 
 sources_prev:
 [
-  {"canonical": "Dana Cho", "speech_style": "direct", "attribution_verb": "blasted"}
+  {
+    "canonical": "Dana Cho",
+    "type": "government",
+    "centrality": "High",
+    "narrative_function": "\"Critic\": Challenges the proposal.",
+    "attributed_text": "\"This audit is long overdue,\"",
+    "speech_style": "direct",
+    "attribution_verb": "blasted"
+  }
 ]
 
 sources_curr:
 [
-  {"canonical": "Dana Cho", "speech_style": "indirect", "attribution_verb": "said"}
+  {
+    "canonical": "Dana Cho",
+    "type": "government",
+    "centrality": "High",
+    "narrative_function": "\"Critic\": Still questions the proposal.",
+    "attributed_text": "said the proposal was flawed",
+    "speech_style": "indirect",
+    "attribution_verb": "said"
+  }
 ]
 
 Example 1 Output:

@@ -10,7 +10,7 @@ cache_raw_responses: true
 skip_if_cached: true
 min_versions: 2
 max_versions: 20
-cleanup_cached_dirs: true
+cleanup_cached_dirs: false
 skip_similarity_threshold: 0.95
 llm_retries: 3
 llm_retry_backoff_seconds: 2.0

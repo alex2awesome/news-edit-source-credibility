@@ -1,7 +1,7 @@
 Detect transitions between direct and indirect speech for recurring sources. Please help me detect how speech style shifts for recurring sources across these versions.
 <rules>
 - Count quoted words difference using best approximation (number of tokens in quotations).
-- Use `prev_source_mentions` and `curr_source_mentions` (JSON lists) to align recurring sources and determine quote spans.
+- Use `prev_source_mentions` and `curr_source_mentions` (JSON lists); each source entry includes `canonical`, `type`, `centrality`, `narrative_function`, `attributed_text`, `speech_style`, and `attribution_verb`.
 - `change` indicates net movement; use `unchanged` when the balance is consistent.
 - Return ONLY valid JSON matching the schema.
 </rules>

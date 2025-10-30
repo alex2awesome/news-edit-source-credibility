@@ -103,7 +103,8 @@ CREATE TABLE IF NOT EXISTS version_pairs (
   angle_summary TEXT,
   title_alignment_notes TEXT,
   title_jaccard_prev REAL,
-  title_jaccard_curr REAL
+  title_jaccard_curr REAL,
+  summary_jaccard REAL
 );
 
 CREATE TABLE IF NOT EXISTS pair_sources_added (

@@ -26,10 +26,13 @@ Example: Earlier version highlights "rioters smashed windows" while later versio
 }
 </json_output>
 
-<article>
-prev_text: {{v_prev}}
-curr_text: {{v_curr}}
-</article>
+<context>
+Prev version changes:
+{{prev_change_context}}
+
+Curr version changes:
+{{curr_change_context}}
+</context>
 
 <protest_prev>
 {{prev_protest_cues}}

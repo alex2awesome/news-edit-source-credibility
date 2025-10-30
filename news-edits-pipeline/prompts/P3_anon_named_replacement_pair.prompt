@@ -1,7 +1,7 @@
 Identify instances where an anonymous reference becomes a named source (or vice versa). Please help me spot where sources switch between anonymous and named across these versions.
 <rules>
 - Consider contextual clues and matching roles/responsibilities.
-- Use `prev_source_mentions`/`curr_source_mentions` (JSON lists) to align references. Each source record indicates `is_anonymous`, `anonymous_description`, and `anonymous_domain`.
+- Use `prev_source_mentions`/`curr_source_mentions` (JSON lists) to align references; each record includes `canonical`, `type`, `centrality`, `narrative_function`, `attributed_text`, plus anonymity fields (`is_anonymous`, `anonymous_description`, `anonymous_domain`).
 - `direction` marks the change direction.
 - `likelihood` ranges 0.0–1.0 reflecting certainty.
 - Return ONLY valid JSON matching the schema.

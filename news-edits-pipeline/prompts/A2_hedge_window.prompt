@@ -4,6 +4,7 @@ Consider modal verbs, adverbs, lexical hedges, and disclaimers.
 - Evaluate only the supplied context for each entry in `target_sources`; do not infer from missing text.
 - Use the `source_id` field to align your analysis with the correct mention and retain the same identifier in the output.
 - Reference the canonical source catalog when helpful to resolve duplicate or alias names.
+- Each `target_source` record provides `canonical`, `type`, and `attributed_text`; the catalog mirrors these fields for quick lookup.
 - Populate lists with unique lowercase tokens/phrases in appearance order.
 - Count hedges conservatively; avoid double-counting the same token.
 - `stance_toward_source` captures how the narrator frames the source’s credibility.
@@ -26,16 +27,9 @@ Target sources:
     "source_id": "source_001",
     "context_window_text": "City emergency managers reportedly warned that the levee \"could buckle overnight,\" according to the briefing memo.",
     "target_source": {
-      "source_id": "source_001",
-      "surface": "City emergency managers",
       "canonical": "City emergency managers",
       "type": "government",
-      "speech_style": "mixed",
-      "attribution_verb": "warned",
-      "char_start": 0,
-      "char_end": 26,
-      "sentence_index": 0,
-      "paragraph_index": 0
+      "attributed_text": "\"could buckle overnight\""
     }
   }
 ]
@@ -44,15 +38,9 @@ Source catalog:
 [
   {
     "source_id": "source_001",
-    "index": 1,
-    "surface": "City emergency managers",
     "canonical": "City emergency managers",
     "type": "government",
-    "speech_style": "mixed",
-    "attribution_verb": "warned",
-    "char_start": 0,
-    "char_end": 26,
-    "confidence": 5
+    "attributed_text": "\"could buckle overnight\""
   }
 ]
 

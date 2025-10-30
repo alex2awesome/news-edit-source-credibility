@@ -137,6 +137,7 @@ This workspace manages the full experiment stack for analysing how news stories 
 | `title_alignment_notes` | TEXT | Narrative description of how title/lede alignment changed. |
 | `title_jaccard_prev` | REAL | Jaccard overlap between previous title and lede. |
 | `title_jaccard_curr` | REAL | Jaccard overlap between current title and lede. |
+| `summary_jaccard` | REAL | Jaccard overlap between earlier and later version summaries. |
 
 ### `pair_sources_added`
 | Column | Type | Description |

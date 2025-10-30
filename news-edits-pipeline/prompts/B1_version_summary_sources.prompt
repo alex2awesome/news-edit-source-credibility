@@ -1,12 +1,13 @@
-Create a sourcing health report for this single article version. Please help me describe what the mix of voices in this version tells us, emphasizing insights we cannot get from other prompts.
+Create a sourcing overview for this article. Please help me describe what the mix of voices in this version tells us.
 <rules>
-- Use the structured `source_mentions` catalog as primary evidence for source types, attribution styles, and hedging; consult the article text only when the catalog is empty or missing detail.
+- Use the structured `source_mentions` catalog as the sole evidence; no article text is provided.
 - Highlight the overall shape of the sourcing rather than estimating precise numerical shares.
 - Use each label definition in `<labels>` as the ground truth for how categories should be applied.
 - Select up to three `highlighted_sources` that best illustrate the sourcing posture in this version.
 - Only output `"none"` in list fields when no other label applies, and never mix `"none"` with additional labels.
 - Report `confidence` on a 1–5 scale (1 = very low, 5 = very high).
 - Return ONLY valid JSON matching the schema.
+- Each source record provides: `canonical`, `type`, `centrality`, `narrative_function`, and `attributed_text`.
 </rules>
 
 <labels>
@@ -61,34 +62,28 @@ highlighted_sources.reason.other: The source stands out for a reason not capture
 
 <examples>
 Example 1 Input:
-Text:
-State emergency director Carla Miles told reporters the wildfire was 40% contained. "We need residents to stay alert," said volunteer captain Jordan Price, who leads the valley fire brigade. A Red Cross spokesperson said two shelters opened overnight.
-
 Sources:
 [
   {
     "canonical": "Carla Miles",
     "type": "government",
-    "speech_style": "indirect",
-    "attribution_verb": "told",
-    "hedge_analysis": {"hedge_markers": [], "hedge_count": 0},
-    "hedge_count": 0
+    "centrality": "High",
+    "narrative_function": "\"Authority\": Provides the official containment status.",
+    "attributed_text": "the wildfire was 40% contained."
   },
   {
     "canonical": "Jordan Price",
     "type": "civil_society",
-    "speech_style": "direct",
-    "attribution_verb": "said",
-    "hedge_analysis": {"hedge_markers": [], "hedge_count": 0},
-    "hedge_count": 0
+    "centrality": "Medium",
+    "narrative_function": "\"Affected Party\": Urges residents to stay alert.",
+    "attributed_text": "\"We need residents to stay alert.\""
   },
   {
     "canonical": "Red Cross spokesperson",
     "type": "civil_society",
-    "speech_style": "indirect",
-    "attribution_verb": "said",
-    "hedge_analysis": {"hedge_markers": [], "hedge_count": 0},
-    "hedge_count": 0
+    "centrality": "Low",
+    "narrative_function": "\"Logistics\": Notes shelter openings.",
+    "attributed_text": "two shelters opened overnight."
   }
 ]
 
@@ -134,11 +129,6 @@ Example 1 Output:
   "confidence": 1
 }
 </json_output>
-
-<article>
-Text:
-{{version_text}}
-</article>
 
 <sources>
 {{source_mentions}}

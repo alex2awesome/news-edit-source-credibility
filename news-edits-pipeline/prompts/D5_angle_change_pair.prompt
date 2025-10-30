@@ -2,6 +2,7 @@ Judge how the dominant angle and emphasis of the story shift between versions, i
 <rules>
 Angle refers to the central storyline, framing emphasis, and the actors or evidence highlighted.
 - Compare who is foregrounded, what information is emphasised, how the tone shifts, and how the title/lede reframes the story.
+- Use the trimmed `prev_sources` and `curr_sources` lists (each entry has `canonical`, `type`, `centrality`, `narrative_function`, and `attributed_text`) to track which voices gain or lose prominence.
 - If the angle is unchanged, set `angle_change_category` to `"no_change"` and keep `angle_summary` concise.
 - Provide qualitative `title_alignment_notes` describing how the title and lede relationship evolves (do NOT compute similarity scores).
 - For `source_transitions`, note when key sources are added, removed, promoted, or demoted and categorise the rationale.

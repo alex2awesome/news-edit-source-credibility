@@ -19,6 +19,8 @@ from canonicalize import fuzzy_match_source, normalize_source
 @lru_cache(maxsize=1)
 def _get_nlp(spacy_model: str):
     """Load spaCy model once."""
+    if not spacy_model:
+        raise ValueError("spaCy model name is required but was not provided.")
     try:
         return spacy.load(spacy_model)
     except OSError as exc:  # pragma: no cover - environment specific
@@ -28,6 +30,7 @@ def _get_nlp(spacy_model: str):
             raise RuntimeError(
                 f"Failed to download spaCy model '{spacy_model}'. Please download it manually and try again."
             ) from exc
+        return spacy.load(spacy_model)
 
 
 _PARAGRAPH_SEP_RE = re.compile(r"(?:\n\s*\n|<p>|</p>)")

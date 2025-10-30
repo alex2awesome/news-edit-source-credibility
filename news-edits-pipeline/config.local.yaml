@@ -2,7 +2,8 @@ model: "llama3"
 backend: "ollama"
 ollama_api_base: "http://localhost:11434"
 temperature: 0.0
-max_tokens: 2048
+spacy_model: en_core_web_sm
+max_tokens: 8192
 batch_size: 4
 hedge_window_tokens: 80
 accept_confidence_min: 3

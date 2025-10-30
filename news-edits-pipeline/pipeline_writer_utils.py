@@ -97,8 +97,8 @@ def insert_version_pairs(writer: OutputWriter, rows: Rows) -> None:
             tokens_deleted, percent_text_new, movement_upweighted_summary,
             movement_downweighted_summary, movement_notes, edit_type, angle_changed,
             angle_change_category, angle_summary, title_alignment_notes,
-            title_jaccard_prev, title_jaccard_curr
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            title_jaccard_prev, title_jaccard_curr, summary_jaccard
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         list(rows),
     )

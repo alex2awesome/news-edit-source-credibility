@@ -1,7 +1,7 @@
 Assess sentiment/stance shifts toward named entities. Please help me assess how sentiment or stance toward each named entity changes between these article versions.
 <rules>
 - Compare evaluative language, quoted opinions, and framing adjectives.
-- Use `prev_source_mentions` and `curr_source_mentions` (JSON lists) to identify recurring actors and align stance shifts; extend to other named entities found in text as needed.
+- Use `prev_source_mentions` and `curr_source_mentions` (JSON lists) to identify recurring actors and align stance shifts; each record provides `canonical`, `type`, `centrality`, `narrative_function`, and `attributed_text`.
 - `delta` should be +1 when stance becomes more supportive, -1 when more skeptical/negative, 0 when unchanged.
 - If stance cannot be determined, use `"unclear"` for both fields and `delta:0`.
 - Return ONLY valid JSON matching the schema.
@@ -57,10 +57,13 @@ Example 1 Output:
 }
 </json_output>
 
-<article>
-prev_text: {{v_prev}}
-curr_text: {{v_curr}}
-</article>
+<context>
+Prev version changes:
+{{prev_change_context}}
+
+Curr version changes:
+{{curr_change_context}}
+</context>
 
 <sources_prev>
 {{prev_source_mentions}}
