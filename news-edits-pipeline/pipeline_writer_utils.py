@@ -37,11 +37,17 @@ def insert_source_mentions(writer: OutputWriter, rows: Rows) -> None:
         """
         INSERT INTO source_mentions (
             version_id, article_id, news_org, source_id_within_article,
-            source_canonical, source_type, speech_style, attribution_verb,
+            source_canonical, source_surface, source_type, speech_style, attribution_verb,
             char_start, char_end, sentence_index, paragraph_index,
             is_in_title, is_in_lede, attributed_text, is_anonymous, anonymous_description,
-            anonymous_domain, evidence_type, evidence_text, prominence_lead_pct, confidence
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            anonymous_domain, evidence_type, evidence_text, narrative_function,
+            centrality, perspective, doubted, hedge_count, hedge_markers,
+            epistemic_verbs, hedge_stance, hedge_confidence, prominence_lead_pct,
+            confidence
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?
+        )
         """,
         list(rows),
     )
@@ -92,44 +98,121 @@ def insert_version_pairs(writer: OutputWriter, rows: Rows) -> None:
     writer.executemany(
         """
         INSERT INTO version_pairs (
-            article_id, news_org, from_version_id, to_version_id,
-            from_version_num, to_version_num, delta_minutes, tokens_added,
-            tokens_deleted, percent_text_new, movement_upweighted_summary,
-            movement_downweighted_summary, movement_notes, edit_type, angle_changed,
-            angle_change_category, angle_summary, title_alignment_notes,
-            title_jaccard_prev, title_jaccard_curr, summary_jaccard
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            article_id,
+            news_org,
+            from_version_id,
+            to_version_id,
+            from_version_num,
+            to_version_num,
+            delta_minutes,
+            tokens_added,
+            tokens_deleted,
+            percent_text_new,
+            movement_upweighted_summary,
+            movement_downweighted_summary,
+            movement_notes,
+            movement_confidence,
+            movement_notable_shifts,
+            edit_type,
+            edit_summary,
+            edit_confidence,
+            angle_changed,
+            angle_change_category,
+            angle_summary,
+            title_alignment_notes,
+            angle_confidence,
+            angle_evidence,
+            title_jaccard_prev,
+            title_jaccard_curr,
+            summary_jaccard
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
         """,
         list(rows),
     )
 
 
 def insert_pair_sources_added(writer: OutputWriter, rows: Rows) -> None:
-    writer.executemany("INSERT INTO pair_sources_added VALUES (?, ?, ?, ?)", list(rows))
+    writer.executemany(
+        """
+        INSERT INTO pair_sources_added (
+            article_id, news_org, from_version_id, to_version_id, surface, canonical, type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        list(rows),
+    )
 
 
 def insert_pair_sources_removed(writer: OutputWriter, rows: Rows) -> None:
-    writer.executemany("INSERT INTO pair_sources_removed VALUES (?, ?, ?, ?)", list(rows))
+    writer.executemany(
+        """
+        INSERT INTO pair_sources_removed (
+            article_id, news_org, from_version_id, to_version_id, surface, canonical, type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        list(rows),
+    )
 
 
 def insert_pair_source_transitions(writer: OutputWriter, rows: Rows) -> None:
-    writer.executemany("INSERT INTO pair_source_transitions VALUES (?, ?, ?, ?, ?, ?)", list(rows))
+    writer.executemany(
+        """
+        INSERT INTO pair_source_transitions (
+            article_id, news_org, from_version_id, to_version_id,
+            canonical, transition_type, reason_category, reason_detail
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        list(rows),
+    )
 
 
 def insert_pair_replacements(writer: OutputWriter, rows: Rows) -> None:
-    writer.executemany("INSERT INTO pair_anon_named_replacements VALUES (?, ?, ?, ?, ?, ?)", list(rows))
+    writer.executemany(
+        """
+        INSERT INTO pair_anon_named_replacements (
+            article_id, news_org, from_version_id, to_version_id,
+            src, dst, direction, likelihood
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        list(rows),
+    )
 
 
 def insert_pair_numeric_changes(writer: OutputWriter, rows: Rows) -> None:
-    writer.executemany("INSERT INTO pair_numeric_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", list(rows))
+    writer.executemany(
+        """
+        INSERT INTO pair_numeric_changes (
+            article_id, news_org, from_version_id, to_version_id,
+            item, prev, curr, delta, unit, source, change_type, confidence
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        list(rows),
+    )
 
 
 def insert_pair_claims(writer: OutputWriter, rows: Rows) -> None:
-    writer.executemany("INSERT INTO pair_claims VALUES (?, ?, ?, ?, ?, ?, ?)", list(rows))
+    writer.executemany(
+        """
+        INSERT INTO pair_claims (
+            article_id, news_org, from_version_id, to_version_id,
+            claim_id, proposition, status, change_note, confidence
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        list(rows),
+    )
 
 
 def insert_pair_cues(writer: OutputWriter, rows: Rows) -> None:
-    writer.executemany("INSERT INTO pair_frame_cues VALUES (?, ?, ?, ?, ?, ?)", list(rows))
+    writer.executemany(
+        """
+        INSERT INTO pair_frame_cues (
+            article_id, news_org, from_version_id, to_version_id,
+            cue, prev, curr, direction
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        list(rows),
+    )
 
 
 def upsert_article_metrics(writer: OutputWriter, row: Tuple[Any, ...]) -> None:

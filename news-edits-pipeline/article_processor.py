@@ -612,6 +612,20 @@ def process_article(
                 if source_id:
                     distinct_source_ids.add(source_id)
 
+                hedge_analysis = mention.get("hedge_analysis") or {}
+                perspective_list = mention.get("perspective") or []
+                if not isinstance(perspective_list, list):
+                    perspective_list = [str(perspective_list)]
+                perspective_json = orjson.dumps(
+                    perspective_list, option=orjson.OPT_INDENT_2
+                ).decode("utf-8")
+                hedge_markers_json = orjson.dumps(
+                    hedge_analysis.get("hedge_markers") or [], option=orjson.OPT_INDENT_2
+                ).decode("utf-8")
+                epistemic_verbs_json = orjson.dumps(
+                    hedge_analysis.get("epistemic_verbs") or [], option=orjson.OPT_INDENT_2
+                ).decode("utf-8")
+
                 source_mentions_records.append(
                     (
                         version_id,
@@ -619,6 +633,7 @@ def process_article(
                         news_org,
                         source_id,
                         mention.get("canonical") or mention.get("surface"),
+                        mention.get("surface"),
                         mention.get("type"),
                         mention.get("speech_style"),
                         mention.get("attribution_verb"),
@@ -634,6 +649,15 @@ def process_article(
                         anonymous_domain,
                         evidence_type,
                         evidence_text,
+                        mention.get("narrative_function"),
+                        mention.get("centrality"),
+                        perspective_json,
+                        int(mention.get("doubted", False)),
+                        mention.get("hedge_count", 0),
+                        hedge_markers_json,
+                        epistemic_verbs_json,
+                        hedge_analysis.get("stance_toward_source"),
+                        hedge_analysis.get("confidence"),
                         mention["prominence"]["lead_percentile"],
                         mention.get("confidence", 5),
                     )
@@ -925,6 +949,10 @@ def process_article(
             movement = results["P10_movement_pair"]
             movement_up = movement.get("movement_summary_upweighted") or ""
             movement_down = movement.get("movement_summary_downweighted") or ""
+            movement_confidence = movement.get("confidence")
+            movement_notable_shifts = orjson.dumps(
+                movement.get("notable_shifts") or [], option=orjson.OPT_INDENT_2
+            ).decode("utf-8")
             movement_notes_parts = movement.get("movement_notes") or []
             if isinstance(movement_notes_parts, list):
                 movement_notes = "\n".join(str(part) for part in movement_notes_parts if part)
@@ -932,12 +960,18 @@ def process_article(
                 movement_notes = str(movement_notes_parts)
 
             a3 = results["A3_edit_type_pair"]
+            edit_summary = a3.get("summary_of_change", "")
+            edit_confidence = a3.get("confidence")
             d5 = results["D5_angle_change_pair"]
 
             angle_changed_flag = int(bool(d5.get("angle_changed", False)))
             angle_category = d5.get("angle_change_category", "no_change")
             angle_summary = d5.get("angle_summary", "")
             title_alignment_notes = d5.get("title_alignment_notes", "")
+            angle_confidence = d5.get("confidence")
+            angle_evidence = orjson.dumps(
+                d5.get("evidence_snippets") or [], option=orjson.OPT_INDENT_2
+            ).decode("utf-8")
             summary_jaccard = text_jaccard_similarity(prev.get("summary") or "", curr.get("summary") or "")
 
             pair_rows.append(
@@ -955,11 +989,17 @@ def process_article(
                     movement_up,
                     movement_down,
                     movement_notes,
+                    movement_confidence,
+                    movement_notable_shifts,
                     a3.get("edit_type"),
+                    edit_summary,
+                    edit_confidence,
                     angle_changed_flag,
                     angle_category,
                     angle_summary,
                     title_alignment_notes,
+                    angle_confidence,
+                    angle_evidence,
                     title_jacc_prev,
                     title_jacc_curr,
                     summary_jaccard,
@@ -967,12 +1007,34 @@ def process_article(
             )
 
             for src in a3.get("sources_added", []):
-                pair_sources_added.append((prev_id, curr_id, src.get("canonical"), src.get("type")))
+                pair_sources_added.append(
+                    (
+                        entry_id,
+                        news_org,
+                        prev_id,
+                        curr_id,
+                        src.get("surface"),
+                        src.get("canonical"),
+                        src.get("type"),
+                    )
+                )
             for src in a3.get("sources_removed", []):
-                pair_sources_removed.append((prev_id, curr_id, src.get("canonical"), src.get("type")))
+                pair_sources_removed.append(
+                    (
+                        entry_id,
+                        news_org,
+                        prev_id,
+                        curr_id,
+                        src.get("surface"),
+                        src.get("canonical"),
+                        src.get("type"),
+                    )
+                )
             for transition in d5.get("source_transitions", []) or []:
                 pair_source_transitions.append(
                     (
+                        entry_id,
+                        news_org,
                         prev_id,
                         curr_id,
                         transition.get("canonical"),
@@ -984,6 +1046,8 @@ def process_article(
             for repl in results["P3_anon_named_replacement_pair"].get("replacements", []):
                 pair_replacements.append(
                     (
+                        entry_id,
+                        news_org,
                         prev_id,
                         curr_id,
                         repl.get("from"),
@@ -995,6 +1059,8 @@ def process_article(
             for numeric in results["P7_numeric_changes_pair"].get("numeric_changes", []):
                 pair_numeric.append(
                     (
+                        entry_id,
+                        news_org,
                         prev_id,
                         curr_id,
                         numeric.get("item"),
@@ -1010,6 +1076,8 @@ def process_article(
             for claim in results["P8_claims_pair"].get("claims", []):
                 pair_claims_rows.append(
                     (
+                        entry_id,
+                        news_org,
                         prev_id,
                         curr_id,
                         claim.get("id"),
@@ -1022,6 +1090,8 @@ def process_article(
             for cue in results["P9_frame_cues_pair"].get("cues", []):
                 pair_cues_rows.append(
                     (
+                        entry_id,
+                        news_org,
                         prev_id,
                         curr_id,
                         cue.get("cue"),

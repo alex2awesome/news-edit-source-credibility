@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS source_mentions (
   news_org TEXT,
   source_id_within_article TEXT,
   source_canonical TEXT,
+  source_surface TEXT,
   source_type TEXT,
   speech_style TEXT,
   attribution_verb TEXT,
@@ -43,6 +44,15 @@ CREATE TABLE IF NOT EXISTS source_mentions (
   anonymous_domain TEXT,
   evidence_type TEXT,
   evidence_text TEXT,
+  narrative_function TEXT,
+  centrality TEXT,
+  perspective TEXT,
+  doubted INTEGER,
+  hedge_count INTEGER,
+  hedge_markers TEXT,
+  epistemic_verbs TEXT,
+  hedge_stance TEXT,
+  hedge_confidence INTEGER,
   prominence_lead_pct REAL,
   confidence REAL
 );
@@ -97,31 +107,45 @@ CREATE TABLE IF NOT EXISTS version_pairs (
   movement_upweighted_summary TEXT,
   movement_downweighted_summary TEXT,
   movement_notes TEXT,
+  movement_confidence INTEGER,
+  movement_notable_shifts TEXT,
   edit_type TEXT,
+  edit_summary TEXT,
+  edit_confidence INTEGER,
   angle_changed INTEGER,
   angle_change_category TEXT,
   angle_summary TEXT,
   title_alignment_notes TEXT,
+  angle_confidence INTEGER,
+  angle_evidence TEXT,
   title_jaccard_prev REAL,
   title_jaccard_curr REAL,
   summary_jaccard REAL
 );
 
 CREATE TABLE IF NOT EXISTS pair_sources_added (
+  article_id INTEGER,
+  news_org TEXT,
   from_version_id TEXT,
   to_version_id TEXT,
+  surface TEXT,
   canonical TEXT,
   type TEXT
 );
 
 CREATE TABLE IF NOT EXISTS pair_sources_removed (
+  article_id INTEGER,
+  news_org TEXT,
   from_version_id TEXT,
   to_version_id TEXT,
+  surface TEXT,
   canonical TEXT,
   type TEXT
 );
 
 CREATE TABLE IF NOT EXISTS pair_source_transitions (
+  article_id INTEGER,
+  news_org TEXT,
   from_version_id TEXT,
   to_version_id TEXT,
   canonical TEXT,
@@ -131,6 +155,8 @@ CREATE TABLE IF NOT EXISTS pair_source_transitions (
 );
 
 CREATE TABLE IF NOT EXISTS pair_anon_named_replacements (
+  article_id INTEGER,
+  news_org TEXT,
   from_version_id TEXT,
   to_version_id TEXT,
   src TEXT,
@@ -140,6 +166,8 @@ CREATE TABLE IF NOT EXISTS pair_anon_named_replacements (
 );
 
 CREATE TABLE IF NOT EXISTS pair_numeric_changes (
+  article_id INTEGER,
+  news_org TEXT,
   from_version_id TEXT,
   to_version_id TEXT,
   item TEXT,
@@ -153,6 +181,8 @@ CREATE TABLE IF NOT EXISTS pair_numeric_changes (
 );
 
 CREATE TABLE IF NOT EXISTS pair_claims (
+  article_id INTEGER,
+  news_org TEXT,
   from_version_id TEXT,
   to_version_id TEXT,
   claim_id TEXT,
@@ -163,6 +193,8 @@ CREATE TABLE IF NOT EXISTS pair_claims (
 );
 
 CREATE TABLE IF NOT EXISTS pair_frame_cues (
+  article_id INTEGER,
+  news_org TEXT,
   from_version_id TEXT,
   to_version_id TEXT,
   cue TEXT,
