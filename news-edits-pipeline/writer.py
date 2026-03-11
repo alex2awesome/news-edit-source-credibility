@@ -11,6 +11,7 @@ from pipeline_writer_utils import (
     insert_entity_mentions,
     insert_pair_claims,
     insert_pair_cues,
+    insert_pair_edit_actions,
     insert_pair_numeric_changes,
     insert_pair_replacements,
     insert_pair_source_transitions,
@@ -33,7 +34,8 @@ def write_article_result(writer: OutputWriter, result: ArticleResult) -> None:
     """Persist the supplied ArticleResult using the shared writer helpers."""
     stats_text = (
         "versions=%d sources=%d entities=%d pairs=%d pair_added=%d pair_removed=%d "
-        "pair_transitions=%d replacements=%d numeric=%d claims=%d cues=%d sources_agg=%d article_metrics=%s"
+        "pair_transitions=%d replacements=%d numeric=%d claims=%d cues=%d pair_edit_actions=%d "
+        "sources_agg=%d article_metrics=%s"
         % (
             len(result.versions_rows),
             len(result.source_mentions_rows),
@@ -46,6 +48,7 @@ def write_article_result(writer: OutputWriter, result: ArticleResult) -> None:
             len(result.pair_numeric),
             len(result.pair_claims_rows),
             len(result.pair_cues_rows),
+            len(result.pair_edit_actions_rows),
             len(result.sources_agg_rows),
             "yes" if result.article_metrics_row is not None else "no",
         )
@@ -126,6 +129,13 @@ def write_article_result(writer: OutputWriter, result: ArticleResult) -> None:
                 "Inserting %d pair_cues rows for article %s", len(result.pair_cues_rows), result.entry_id
             )
             insert_pair_cues(writer, result.pair_cues_rows)
+        if result.pair_edit_actions_rows:
+            logger.debug(
+                "Inserting %d pair_edit_actions rows for article %s",
+                len(result.pair_edit_actions_rows),
+                result.entry_id,
+            )
+            insert_pair_edit_actions(writer, result.pair_edit_actions_rows)
         if result.sources_agg_rows:
             logger.debug(
                 "Upserting %d sources_agg rows for article %s", len(result.sources_agg_rows), result.entry_id

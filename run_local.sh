@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_CONFIG="${1:-"$ROOT_DIR/news-edits-pipeline/config.local.yaml"}"
 DB_DIR="$ROOT_DIR/article-versions"
+EXTRA_ARGS=("${@:2}")
 
 if [[ ! -f "$BASE_CONFIG" ]]; then
   echo "Config file not found: $BASE_CONFIG" >&2
@@ -39,4 +40,5 @@ fi
 
 python "$ROOT_DIR/news-edits-pipeline/pipeline.py" \
   --config "$BASE_CONFIG" \
-  "${DB_ARGS[@]}"
+  "${DB_ARGS[@]}" \
+  "${EXTRA_ARGS[@]}"

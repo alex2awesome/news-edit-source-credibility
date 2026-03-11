@@ -239,10 +239,10 @@ First-to-final deltas derived from version metrics plus the framing comparison p
 
 1. **Prepare article snapshots**: place source `.db` or `.db.gz` files under `article-versions/`.
 2. **Configure runtime**: edit `news-edits-pipeline/config.yaml` (model endpoint, caching, filters).
-3. **Run the pipeline**: `./run.sh` (remote vLLM) or `./run_local.sh` (local inference). Every prompt response is cached and replayable.
+3. **Run the pipeline**: `./run.sh` (remote vLLM) or `./run_local.sh` (local inference). To restrict processing to Matt’s minimal feature set (the tables behind `notebooks/ap_analysis_matt_features.ipynb`), append `--matt-features-only` to the invocation or set `matt_features_only: true` in the config. Every prompt response is cached and replayable.
 4. **Explore**: open `notebooks/ap_analysis_overview.ipynb` after a run to inspect tables, sample rows, and quick aggregates.
 
-Because caches are always consulted first (`skip_if_cached: true`), you can rerun the pipeline to rebuild `analysis.db` without incurring new LLM costs.
+Because caches are always consulted first (`skip_if_cached: true`), you can rerun the pipeline—or switch between the matt-only and full modes—without incurring new LLM costs as long as you reuse the same `out_root`.
 
 ---
 

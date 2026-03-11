@@ -203,6 +203,21 @@ CREATE TABLE IF NOT EXISTS pair_frame_cues (
   direction TEXT
 );
 
+CREATE TABLE IF NOT EXISTS pair_edit_actions (
+  article_id INTEGER,
+  news_org TEXT,
+  from_version_id TEXT,
+  to_version_id TEXT,
+  from_version_num INTEGER,
+  to_version_num INTEGER,
+  pair_policy TEXT,
+  editor_request TEXT,
+  writer_action TEXT,
+  content_added TEXT,
+  content_removed TEXT,
+  content_changed TEXT
+);
+
 CREATE TABLE IF NOT EXISTS version_metrics (
   version_id TEXT PRIMARY KEY,
   article_id INTEGER,

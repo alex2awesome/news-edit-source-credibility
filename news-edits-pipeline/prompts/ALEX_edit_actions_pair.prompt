@@ -1,0 +1,63 @@
+I will show you two versions of the same news article that has been updated by the journalist.
+
+Imagine the major requests made by an editor that WOULD HAVE triggered changes in the article.
+Then, imagine plausible, higher-level actions the journalist took to update the article. When you imagine the journalist's action,
+go deeper than just restating the editor's requests (see the examples). Really imagine what the journalist may have done in the world.
+
+Some differences will result in bigger changes than others. Try to identify the core set of "actions" performed by the journalist.
+Avoid minor edits/spelling unless that is the only change made.
+Be sure to enumerate all differences. Give as much detail as you want and make the user request realistic.
+
+Answer in a JSON list with [
+{
+"request": <request>,
+"writer action": <real-world action the journalist did to meet request>,
+"content added": <copy exactly what content, if any, was added as a result of these actions>,
+"content removed": <copy exactly what content, if any, was removed>,
+"content changed": <copy exactly what content, if any, changed/updated>
+}
+]
+
+<output examples>
+example 1:
+
+{
+"request": "Give me more detail about the impact of the law on polygamous families",
+"writer action": "Retrieves background article online, speaks to expert witness",
+"content added": "Polygamous families constitue a large portion of Utah's residents, so the law will likely make them less able to go outside, according to the following sources..."
+"content removed": null,
+"content changed": null
+}
+
+example 2:
+{
+"request": "The Tom Neville quote from the California Renters Alliance is kind of bland and generic — 'pushed out of their communities' could be about anything. Can you find a more compelling tenant-side voice, ideally someone closer to the ground who actually works with affected renters? Bonus if they've testified or have something concrete to say.",
+"writer action": "Interviewed several sources. Chose Maria Sandoval, a tenant organizer with the Housing Justice Collective in Los Angeles, who provided a more vivid and specific quote based on her recent testimony before the Assembly Housing Committee.",
+"content added": "\"We're seeing families doubled and tripled up in apartments because they can't absorb another increase,\" said Maria Sandoval, a tenant organizer with the Housing Justice Collective in Los Angeles, who testified before the Assembly Housing Committee last week.",
+"content removed": "\"Renters are being pushed out of their communities,\" said Tom Neville, a spokesperson for the California Renters Alliance.",
+"content changed": null
+}
+
+example 3:
+{
+"request": "Strip out the editorializing throughout — 'absolutely devastating,' 'terrorizing,' 'ran screaming,' 'desperately' — let the facts speak for themselves. This reads like a blog post.",
+"writer action": "Removed emotionally loaded adjectives and adverbs throughout the article and replaced them with neutral, factual descriptions. 'Destroying homes and terrorizing residents who ran screaming into the streets' was cut, and 'desperately searching through the rubble' became 'searching collapsed structures for survivors.'",
+"content added": null,
+"content removed": "absolutely devastating; terrorizing residents who ran screaming into the streets; desperately",
+"content changed": "'rocked the small coastal town' changed to 'struck the coastal town'; 'desperately searching through the rubble' changed to 'searching collapsed structures for survivors'; 'badly damaged and is struggling to treat the flood of victims' changed to 'sustained significant structural damage and is operating at limited capacity'"
+}
+</output examples>
+
+<article_versions>
+Here are two versions of the same news article:
+
+<version_1>
+{{article_v1}}
+</version_1>
+
+<version_2>
+{{article_v2}}
+</version_2>
+</article_versions>
+
+Don't respond with anything besides the JSON list.

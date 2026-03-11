@@ -1,0 +1,46 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "request": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "writer action": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "content added": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "content removed": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "content changed": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "request",
+      "writer action",
+      "content added",
+      "content removed",
+      "content changed"
+    ],
+    "additionalProperties": false
+  }
+}

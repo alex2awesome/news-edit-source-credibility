@@ -38,3 +38,15 @@ out/
 
 # Local data/config copies
 article-versions/
+unzipped-article-versions/
+data/
+edit-actions/
+opinion-article-actions/
+
+# Sync state files
+.sync_with_sk_state.json
+.sync_with_sk_last_sync.json
+.sync-ignore
+
+# Auth tokens
+token.json

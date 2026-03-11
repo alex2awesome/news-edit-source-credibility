@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import difflib
 import logging
-from dataclasses import dataclass
+import random
+from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import orjson
+import tiktoken
 
 from analysis import (
     aggregate_sources_over_versions,
@@ -38,6 +42,25 @@ from prompt_utils import build_pair_prompt_payloads, text_jaccard_similarity
 logger = logging.getLogger(__name__)
 
 HEDGE_WINDOW_BATCH_SIZE = 5
+_ALEX_VERSION_TOKEN_LIMIT = 3500
+SOURCE_ALIASES: Dict[str, str] = {
+    "guardian": "newssniffer-guardian",
+    "newssniffer-guardian": "newssniffer-guardian",
+    "nytimes": "newssniffer-nytimes",
+    "new york times": "newssniffer-nytimes",
+    "newssniffer-nytimes": "newssniffer-nytimes",
+    "washpo": "newssniffer-washpo",
+    "washington post": "newssniffer-washpo",
+    "washington-post": "newssniffer-washpo",
+    "newssniffer-washpo": "newssniffer-washpo",
+    "bbc": "newssniffer-bbc",
+    "newssniffer-bbc": "newssniffer-bbc",
+    "independent": "newssniffer-independent",
+    "newssniffer-independent": "newssniffer-independent",
+    "ap": "ap",
+    "associated press": "ap",
+    "reuters": "reuters",
+}
 
 
 @dataclass
@@ -61,6 +84,7 @@ class ArticleResult:
     article_metrics_row: Optional[Tuple[Any, ...]]
     live_blog_only: bool
     log_message: str
+    pair_edit_actions_rows: List[Tuple[Any, ...]] = field(default_factory=list)
 
 
 def _assign_source_id(mention: Dict[str, Any], registry: Dict[str, Dict[str, Any]]) -> str:
@@ -167,6 +191,192 @@ def _normalize_version_number(value: Any) -> int:
             raise ValueError(f"Unable to coerce version number {value!r} to int") from exc
 
 
+def _version_lookup_by_num(versions: Sequence[Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:
+    lookup: Dict[int, Dict[str, Any]] = {}
+    for version in versions:
+        version_num = _normalize_version_number(version["version"])
+        lookup[version_num] = version
+    return lookup
+
+
+def _canonical_source_name(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return ""
+    return SOURCE_ALIASES.get(normalized, normalized)
+
+
+@lru_cache(maxsize=8)
+def _get_encoding(name: str):
+    return tiktoken.get_encoding(name)
+
+
+def _truncate_text_for_prompt(text: str, max_tokens: int, encoding_name: Optional[str]) -> str:
+    content = text or ""
+    if max_tokens <= 0:
+        return content
+    try:
+        encoding = _get_encoding(encoding_name or "cl100k_base")
+        token_ids = encoding.encode(content)
+        if len(token_ids) <= max_tokens:
+            return content
+        if hasattr(encoding, "decode"):
+            return encoding.decode(token_ids[:max_tokens])  # type: ignore[no-any-return]
+    except Exception:
+        pass
+    words = content.split()
+    if len(words) <= max_tokens:
+        return content
+    return " ".join(words[:max_tokens])
+
+
+def _candidate_nonadjacent_pairs(version_numbers: Sequence[int]) -> List[Tuple[int, int]]:
+    pairs: List[Tuple[int, int]] = []
+    for i, left in enumerate(version_numbers):
+        for right in version_numbers[i + 1 :]:
+            if right - left > 1:
+                pairs.append((left, right))
+    return pairs
+
+
+def _build_generated_pairs(
+    version_nums: Sequence[int],
+    random_pairs_per_article: int,
+    rng: random.Random,
+) -> List[Tuple[int, int, str]]:
+    if len(version_nums) < 2:
+        return []
+
+    pairs: List[Tuple[int, int, str]] = []
+    pairs.append((version_nums[0], version_nums[-1], "first_final"))
+    for idx in range(len(version_nums) - 1):
+        pairs.append((version_nums[idx], version_nums[idx + 1], "consecutive"))
+
+    if random_pairs_per_article > 0:
+        nonadjacent = _candidate_nonadjacent_pairs(version_nums)
+        rng.shuffle(nonadjacent)
+        keep = nonadjacent[: min(random_pairs_per_article, len(nonadjacent))]
+        pairs.extend((left, right, "random_k") for left, right in keep)
+    return pairs
+
+
+def _sequence_change_ratio(text_a: str, text_b: str) -> float:
+    ratio = difflib.SequenceMatcher(None, text_a or "", text_b or "").ratio()
+    return 1.0 - ratio
+
+
+def _build_dynamic_pairs(
+    version_nums: Sequence[int],
+    version_lookup: Dict[int, Dict[str, Any]],
+    target_change: float,
+) -> List[Tuple[int, int, str]]:
+    if len(version_nums) < 2:
+        return []
+
+    pairs: List[Tuple[int, int, str]] = []
+    cache: Dict[Tuple[int, int], float] = {}
+    idx = 0
+    while idx < len(version_nums) - 1:
+        from_num = version_nums[idx]
+        from_text = version_lookup[from_num].get("summary") or ""
+        best_idx = idx + 1
+        best_dist = float("inf")
+
+        for cand_idx in range(idx + 1, len(version_nums)):
+            to_num = version_nums[cand_idx]
+            key = (from_num, to_num)
+            if key not in cache:
+                to_text = version_lookup[to_num].get("summary") or ""
+                cache[key] = _sequence_change_ratio(from_text, to_text)
+            distance = abs(cache[key] - target_change)
+            if distance < best_dist or (distance == best_dist and cand_idx < best_idx):
+                best_dist = distance
+                best_idx = cand_idx
+
+        to_num = version_nums[best_idx]
+        if to_num <= from_num:
+            break
+        pairs.append((from_num, to_num, "dynamically_generated"))
+        if best_idx <= idx:
+            idx += 1
+        else:
+            idx = best_idx
+    return pairs
+
+
+def _select_alex_pairs(
+    entry_id: int,
+    news_org: str,
+    versions: Sequence[Dict[str, Any]],
+    random_pairs_per_article: int,
+    pair_directives: Optional[Sequence[Tuple[str, Optional[int], Optional[int]]]],
+    pair_list_supplied: bool,
+    dynamic_pairs_enabled: bool,
+    dynamic_only: bool,
+    dynamic_target_change: float,
+) -> List[Tuple[Dict[str, Any], Dict[str, Any], str]]:
+    version_lookup = _version_lookup_by_num(versions)
+    version_nums = sorted(version_lookup.keys())
+    if len(version_nums) < 2:
+        return []
+
+    selected: Dict[Tuple[int, int], set[str]] = {}
+
+    def add_pair(from_num: int, to_num: int, policy: str) -> None:
+        if from_num >= to_num:
+            return
+        if from_num not in version_lookup or to_num not in version_lookup:
+            return
+        key = (from_num, to_num)
+        selected.setdefault(key, set()).add(policy)
+
+    rng = random.Random(entry_id)
+
+    if pair_list_supplied:
+        directives = pair_directives or []
+        org_norm = _canonical_source_name(news_org)
+        matching = [item for item in directives if _canonical_source_name(item[0] or "") == org_norm]
+        if not matching:
+            return []
+        needs_generated = False
+        for _, from_num, to_num in matching:
+            if from_num is None or to_num is None:
+                needs_generated = True
+                continue
+            add_pair(from_num, to_num, "pair_list_explicit")
+        if needs_generated:
+            if dynamic_only:
+                for from_num, to_num, _policy in _build_dynamic_pairs(version_nums, version_lookup, dynamic_target_change):
+                    add_pair(from_num, to_num, "pair_list_generated")
+            else:
+                for from_num, to_num, _policy in _build_generated_pairs(version_nums, random_pairs_per_article, rng):
+                    add_pair(from_num, to_num, "pair_list_generated")
+                if dynamic_pairs_enabled:
+                    for from_num, to_num, _policy in _build_dynamic_pairs(version_nums, version_lookup, dynamic_target_change):
+                        add_pair(from_num, to_num, "dynamically_generated")
+    else:
+        if not dynamic_only:
+            for from_num, to_num, policy in _build_generated_pairs(version_nums, random_pairs_per_article, rng):
+                add_pair(from_num, to_num, policy)
+        if dynamic_pairs_enabled:
+            for from_num, to_num, _policy in _build_dynamic_pairs(version_nums, version_lookup, dynamic_target_change):
+                add_pair(from_num, to_num, "dynamically_generated")
+
+    comparisons: List[Tuple[Dict[str, Any], Dict[str, Any], str]] = []
+    for (from_num, to_num), policies in selected.items():
+        policy = "|".join(sorted(policies))
+        comparisons.append((version_lookup[from_num], version_lookup[to_num], policy))
+    return comparisons
+
+
+def _normalize_alex_actions(payload: Any) -> List[Dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        return [payload]
+    return []
+
+
 def process_article(
     entry_id: int,
     db_path: Path,
@@ -174,6 +384,8 @@ def process_article(
     client: Optional[StructuredLLMClient],
     out_root: Path,
     verbose: bool = False,
+    alex_pair_directives: Optional[Sequence[Tuple[str, Optional[int], Optional[int]]]] = None,
+    alex_pair_list_supplied: bool = False,
 ) -> Optional[ArticleResult]:
     """Process a single article and return the structured results."""
     owns_client = False
@@ -185,15 +397,140 @@ def process_article(
     article_dir = out_root / str(entry_id)
     if cache_enabled:
         ensure_dir(article_dir)
+    features_only = bool(getattr(config, "matt_features_only", False))
+    alex_features_only = bool(getattr(config, "alex_features_only", False))
 
     try:
         versions = load_versions(str(db_path), entry_id)
         if not versions:
-            logger.info("Skipping entry %s: no versions returned from loader", entry_id)
+            logger.debug("Skipping entry %s: no versions returned from loader", entry_id)
             return None
 
+        news_org = versions[0]["source"]
+        url = versions[0]["url"]
+        title_first = versions[0]["title"]
+        title_final = versions[-1]["title"]
+        original_ts = versions[0]["created"]
+
+        if alex_features_only:
+            if len(versions) < 2:
+                logger.debug("Skipping article %s in alex mode: only %d version(s)", entry_id, len(versions))
+                return None
+
+            versions_rows = [
+                (
+                    version_entry["id"],
+                    entry_id,
+                    news_org,
+                    _normalize_version_number(version_entry["version"]),
+                    version_entry.get("created"),
+                    version_entry.get("title"),
+                    len(version_entry.get("summary") or ""),
+                )
+                for version_entry in versions
+            ]
+            article_row = (
+                entry_id,
+                news_org,
+                url,
+                title_first,
+                title_final,
+                original_ts,
+                len(versions) - 1,
+                0,
+            )
+            pair_comparisons = _select_alex_pairs(
+                entry_id,
+                news_org,
+                versions,
+                max(0, int(getattr(config, "alex_random_pairs_per_article", 0))),
+                alex_pair_directives,
+                alex_pair_list_supplied,
+                bool(getattr(config, "alex_dynamic_pairs", False) or getattr(config, "dynamic_only", False)),
+                bool(getattr(config, "dynamic_only", False)),
+                float(getattr(config, "dynamic_target_change", 0.20)),
+            )
+            if not pair_comparisons:
+                logger.debug("Skipping article %s in alex mode: no eligible version pairs selected", entry_id)
+                return None
+
+            pair_edit_actions_rows: List[Tuple[Any, ...]] = []
+            for prev, curr, pair_policy in pair_comparisons:
+                prev_id = prev["id"]
+                curr_id = curr["id"]
+                prev_num = _normalize_version_number(prev["version"])
+                curr_num = _normalize_version_number(curr["version"])
+                pair_dir = article_dir / f"v{prev_num:03d}_to_v{curr_num:03d}"
+                if cache_enabled:
+                    ensure_dir(pair_dir)
+
+                rendered = render_prompt(
+                    load_prompt_template("ALEX_edit_actions_pair"),
+                    {
+                        "article_v1": _truncate_text_for_prompt(
+                            prev.get("summary") or "",
+                            _ALEX_VERSION_TOKEN_LIMIT,
+                            config.tiktoken_encoding,
+                        ),
+                        "article_v2": _truncate_text_for_prompt(
+                            curr.get("summary") or "",
+                            _ALEX_VERSION_TOKEN_LIMIT,
+                            config.tiktoken_encoding,
+                        ),
+                    },
+                )
+                result = client.run(
+                    "ALEX_edit_actions_pair",
+                    rendered,
+                    pair_dir / "ALEX_edit_actions_pair.json",
+                )
+                actions = _normalize_alex_actions(result)
+                if not actions:
+                    actions = [{}]
+                for action in actions:
+                    pair_edit_actions_rows.append(
+                        (
+                            entry_id,
+                            news_org,
+                            prev_id,
+                            curr_id,
+                            prev_num,
+                            curr_num,
+                            pair_policy,
+                            action.get("request"),
+                            action.get("writer action"),
+                            action.get("content added"),
+                            action.get("content removed"),
+                            action.get("content changed"),
+                        )
+                    )
+
+            log_message = f"Processed article {entry_id} ({len(pair_edit_actions_rows)} alex pairs)"
+            return ArticleResult(
+                entry_id=entry_id,
+                news_org=news_org,
+                article_row=article_row,
+                versions_rows=versions_rows,
+                source_mentions_rows=[],
+                entity_rows=[],
+                version_metrics_rows=[],
+                pair_rows=[],
+                pair_sources_added=[],
+                pair_sources_removed=[],
+                pair_source_transitions=[],
+                pair_replacements=[],
+                pair_numeric=[],
+                pair_claims_rows=[],
+                pair_cues_rows=[],
+                sources_agg_rows=[],
+                article_metrics_row=None,
+                live_blog_only=False,
+                log_message=log_message,
+                pair_edit_actions_rows=pair_edit_actions_rows,
+            )
+
         if len(versions) < config.min_versions:
-            logger.info(
+            logger.debug(
                 "Skipping entry %s during processing: only %d version(s) < min_versions=%d",
                 entry_id,
                 len(versions),
@@ -201,7 +538,7 @@ def process_article(
             )
             return None
         if config.max_versions is not None and len(versions) >= config.max_versions:
-            logger.info(
+            logger.debug(
                 "Skipping entry %s during processing: %d version(s) exceeds max_versions=%d",
                 entry_id,
                 len(versions),
@@ -209,13 +546,317 @@ def process_article(
             )
             return None
 
+        if features_only:
+            source_registry: Dict[str, Dict[str, Any]] = {}
+            versions_rows: List[Tuple[Any, ...]] = []
+            source_mentions_records: List[Tuple[Any, ...]] = []
+            version_metrics_rows: List[Tuple[Any, ...]] = []
+            pair_rows: List[Tuple[Any, ...]] = []
+            version_payloads: Dict[str, Dict[str, str]] = {}
+            institutional_types = {"government", "corporate", "law_enforcement"}
+
+            matt_versions = versions if len(versions) <= 1 else [versions[0], versions[-1]]
+            for version in matt_versions:
+                version_id = version["id"]
+                version_num = _normalize_version_number(version["version"])
+                version_dir = article_dir / f"v{version_num:03d}"
+                if cache_enabled:
+                    ensure_dir(version_dir)
+
+                text = version.get("summary") or ""
+                title = version.get("title") or ""
+
+                rendered_a1 = render_prompt(
+                    load_prompt_template("A1_source_mentions"),
+                    {
+                        "news_article": text,
+                        "version_text": text,
+                        "title": title,
+                        "article_id": str(entry_id),
+                        "version_id": str(version_id),
+                        "timestamp_utc": version.get("created") or "",
+                    },
+                )
+                a1_result = client.run(
+                    "A1_source_mentions",
+                    rendered_a1,
+                    version_dir / "A1_source_mentions.json",
+                )
+                a1_result = prune_low_confidence(a1_result, config.accept_confidence_min)
+                mentions_raw = a1_result.get("source_mentions", [])
+
+                mentions: List[Dict[str, Any]] = []
+                brief_mentions: List[Dict[str, Any]] = []
+                distinct_source_ids = set()
+                total_attributed_words = 0
+                institutional_words = 0
+                anonymous_words = 0
+
+                for mention_raw in mentions_raw:
+                    mention = dict(mention_raw)
+                    source_id = _assign_source_id(mention, source_registry)
+                    mention["source_id_within_article"] = source_id
+
+                    attributed_text = mention.get("attributed_text") or ""
+                    words = len(attributed_text.split())
+                    total_attributed_words += words
+
+                    source_type = mention.get("type")
+                    if source_type in institutional_types:
+                        institutional_words += words
+
+                    is_anonymous = bool(mention.get("is_anonymous"))
+                    anonymous_description = (mention.get("anonymous_description") or "").strip()
+                    anonymous_domain = (mention.get("anonymous_domain") or "unknown").lower()
+                    if anonymous_domain not in {"government", "corporate", "law_enforcement", "individual", "unknown"}:
+                        anonymous_domain = "unknown"
+
+                    if is_anonymous:
+                        if attributed_text:
+                            anonymous_words += words
+                        elif anonymous_description:
+                            anonymous_words += len(anonymous_description.split())
+
+                    if source_id:
+                        distinct_source_ids.add(source_id)
+
+                    evidence_type = (mention.get("evidence_type") or "other").lower()
+                    if evidence_type not in {
+                        "official_statement",
+                        "press_release",
+                        "eyewitness",
+                        "document",
+                        "statistic",
+                        "prior_reporting",
+                        "social_media",
+                        "court_filing",
+                        "other",
+                    }:
+                        evidence_type = "other"
+
+                    hedge_markers_json = orjson.dumps([], option=orjson.OPT_INDENT_2).decode("utf-8")
+                    epistemic_verbs_json = orjson.dumps([], option=orjson.OPT_INDENT_2).decode("utf-8")
+                    perspective_json = orjson.dumps([], option=orjson.OPT_INDENT_2).decode("utf-8")
+
+                    source_mentions_records.append(
+                        (
+                            version_id,  # version_id
+                            entry_id,  # article_id
+                            news_org,  # news_org
+                            source_id,  # source_id_within_article
+                            mention.get("canonical") or mention.get("surface"),  # source_canonical
+                            mention.get("surface"),  # source_surface
+                            source_type,  # source_type
+                            mention.get("speech_style"),  # speech_style
+                            mention.get("attribution_verb"),  # attribution_verb
+                            mention.get("char_start", -1),  # char_start
+                            mention.get("char_end", -1),  # char_end
+                            -1,  # sentence_index
+                            -1,  # paragraph_index
+                            int(False),  # is_in_title
+                            int(False),  # is_in_lede
+                            attributed_text,  # attributed_text
+                            int(is_anonymous),  # is_anonymous
+                            anonymous_description,  # anonymous_description
+                            anonymous_domain,  # anonymous_domain
+                            evidence_type,  # evidence_type
+                            mention.get("evidence_text") or attributed_text,  # evidence_text
+                            None,  # narrative_function
+                            None,  # centrality
+                            perspective_json,  # perspective
+                            int(False),  # doubted
+                            0,  # hedge_count
+                            hedge_markers_json,  # hedge_markers
+                            epistemic_verbs_json,  # epistemic_verbs
+                            None,  # hedge_stance
+                            None,  # hedge_confidence
+                            None,  # prominence_lead_pct
+                            mention.get("confidence", 5),  # confidence
+                        )
+                    )
+
+                    brief_mentions.append(
+                        {
+                            "canonical": mention.get("canonical") or mention.get("surface") or "",
+                            "type": source_type,
+                            "centrality": None,
+                            "narrative_function": None,
+                            "attributed_text": attributed_text,
+                        }
+                    )
+                    mentions.append(mention)
+
+                total_attributed_words = max(total_attributed_words, 0)
+                institutional_share = (
+                    institutional_words / total_attributed_words if total_attributed_words else 0.0
+                )
+                anonymous_share = (
+                    anonymous_words / total_attributed_words if total_attributed_words else 0.0
+                )
+
+                version_metrics_rows.append(
+                    (
+                        version_id,
+                        entry_id,
+                        news_org,
+                        len(distinct_source_ids),
+                        institutional_share,
+                        anonymous_share,
+                        0.0,
+                    )
+                )
+
+                versions_rows.append(
+                    (
+                        version_id,
+                        entry_id,
+                        news_org,
+                        version_num,
+                        version.get("created"),
+                        title,
+                        len(text),
+                    )
+                )
+
+                version_payloads.setdefault(version_id, {})
+                version_payloads[version_id]["source_mentions"] = orjson.dumps(
+                    mentions,
+                    option=orjson.OPT_INDENT_2,
+                ).decode("utf-8")
+                version_payloads[version_id]["source_mentions_brief"] = orjson.dumps(
+                    brief_mentions,
+                    option=orjson.OPT_INDENT_2,
+                ).decode("utf-8")
+
+            if len(versions) < 2:
+                logger.debug("Skipping article %s in matt mode: only %d version(s)", entry_id, len(versions))
+                return None
+
+            pair_comparisons: List[Tuple[Dict[str, Any], Dict[str, Any]]] = [(versions[0], versions[-1])]
+            for prev, curr in pair_comparisons:
+                prev_id = prev["id"]
+                curr_id = curr["id"]
+                prev_num = _normalize_version_number(prev["version"])
+                curr_num = _normalize_version_number(curr["version"])
+                pair_dir = article_dir / f"v{prev_num:03d}_to_v{curr_num:03d}"
+                if cache_enabled:
+                    ensure_dir(pair_dir)
+
+                delta_minutes = inter_update_timing(prev.get("created"), curr.get("created"))
+                pair_prompts = build_pair_prompt_payloads(
+                    prev,
+                    curr,
+                    version_payloads.get(prev_id, {}),
+                    version_payloads.get(curr_id, {}),
+                )
+                desired_keys = [
+                    key for key in ("A3_edit_type_pair", "D5_angle_change_pair", "P10_movement_pair") if key in pair_prompts
+                ]
+                pair_specs: List[Tuple[str, str, Path, int]] = []
+                for key in desired_keys:
+                    payload = pair_prompts[key]
+                    rendered = render_prompt(load_prompt_template(key), payload)
+                    pair_specs.append((key, rendered, pair_dir / f"{key}.json", config.llm_retries))
+
+                pair_results = client.run_many(pair_specs)
+                if len(pair_results) != len(pair_specs):
+                    raise RuntimeError(
+                        f"Expected {len(pair_specs)} pair prompt responses but received {len(pair_results)}"
+                    )
+                results = {
+                    key: prune_low_confidence(result, config.accept_confidence_min)
+                    for (key, _, _, _), result in zip(pair_specs, pair_results)
+                }
+
+                movement = results.get("P10_movement_pair", {})
+                movement_up = movement.get("movement_summary_upweighted") or ""
+                movement_down = movement.get("movement_summary_downweighted") or ""
+                movement_confidence = movement.get("confidence")
+                movement_notable_shifts = orjson.dumps(
+                    movement.get("notable_shifts") or [], option=orjson.OPT_INDENT_2
+                ).decode("utf-8")
+                movement_notes_parts = movement.get("movement_notes") or []
+                if isinstance(movement_notes_parts, list):
+                    movement_notes = "\n".join(str(part) for part in movement_notes_parts if part)
+                else:
+                    movement_notes = str(movement_notes_parts)
+
+                a3 = results.get("A3_edit_type_pair", {})
+                d5 = results.get("D5_angle_change_pair", {})
+                pair_rows.append(
+                    (
+                        entry_id,
+                        news_org,
+                        prev_id,
+                        curr_id,
+                        prev_num,
+                        curr_num,
+                        delta_minutes,
+                        None,  # tokens_added
+                        None,  # tokens_deleted
+                        None,  # percent_text_new
+                        movement_up,
+                        movement_down,
+                        movement_notes,
+                        movement_confidence,
+                        movement_notable_shifts,
+                        a3.get("edit_type"),
+                        a3.get("summary_of_change", ""),
+                        a3.get("confidence"),
+                        int(bool(d5.get("angle_changed", False))),
+                        d5.get("angle_change_category", "no_change"),
+                        d5.get("angle_summary", ""),
+                        d5.get("title_alignment_notes", ""),
+                        d5.get("confidence"),
+                        orjson.dumps(
+                            d5.get("evidence_snippets") or [], option=orjson.OPT_INDENT_2
+                        ).decode("utf-8"),
+                        None,  # title_jacc_prev
+                        None,  # title_jacc_curr
+                        None,  # summary_jaccard
+                    )
+                )
+
+            article_row = (
+                entry_id,
+                news_org,
+                url,
+                title_first,
+                title_final,
+                original_ts,
+                len(versions) - 1,
+                0,
+            )
+            log_message = f"Processed article {entry_id} ({len(versions)} versions)"
+            return ArticleResult(
+                entry_id=entry_id,
+                news_org=news_org,
+                article_row=article_row,
+                versions_rows=versions_rows,
+                source_mentions_rows=source_mentions_records,
+                entity_rows=[],
+                version_metrics_rows=version_metrics_rows,
+                pair_rows=pair_rows,
+                pair_sources_added=[],
+                pair_sources_removed=[],
+                pair_source_transitions=[],
+                pair_replacements=[],
+                pair_numeric=[],
+                pair_claims_rows=[],
+                pair_cues_rows=[],
+                sources_agg_rows=[],
+                article_metrics_row=None,
+                live_blog_only=False,
+                log_message=log_message,
+            )
+
         similarity_threshold = config.skip_similarity_threshold
         if similarity_threshold is not None and len(versions) >= 2:
             first_text = versions[0].get("summary") or ""
             final_text = versions[-1].get("summary") or ""
             similarity = text_jaccard_similarity(first_text, final_text)
             if similarity_threshold > 0 and similarity >= similarity_threshold:
-                logger.info(
+                logger.debug(
                     "Skipping entry %s: high similarity between first and final versions "
                     "(Jaccard=%.3f, threshold=%.3f)",
                     entry_id,
@@ -223,12 +864,6 @@ def process_article(
                     similarity_threshold,
                 )
                 return None
-
-        news_org = versions[0]["source"]
-        url = versions[0]["url"]
-        title_first = versions[0]["title"]
-        title_final = versions[-1]["title"]
-        original_ts = versions[0]["created"]
 
         source_registry: Dict[str, Dict[str, Any]] = {}
         entity_registry: Dict[str, str] = {}
@@ -287,7 +922,7 @@ def process_article(
                 if d4_result.get("is_live_blog"):
                     live_blog_flag = True
                     skip_article_due_to_live_blog = True
-                    logger.info("Article %s flagged as live blog; skipping remaining processing", entry_id)
+                    logger.debug("Article %s flagged as live blog; skipping remaining processing", entry_id)
                     break
                 live_blog_checked = True
 
@@ -319,7 +954,11 @@ def process_article(
                 load_prompt_template("A1_source_mentions"),
                 {
                     "news_article": text,
+                    "version_text": text,
                     "title": title,
+                    "article_id": str(entry_id),
+                    "version_id": str(version_id),
+                    "timestamp_utc": version.get("created") or "",
                 },
             )
             a1_result = client.run(
@@ -718,75 +1357,76 @@ def process_article(
             version_payloads[version_id]["source_mentions_identity"] = identity_mentions_json
             version_payloads[version_id]["source_mentions_speech"] = speech_mentions_json
 
-            classifier_specs: List[Tuple[str, str, Path, int]] = []
-            if "correction" in text.lower():
+            if not features_only:
+                classifier_specs: List[Tuple[str, str, Path, int]] = []
+                if "correction" in text.lower():
+                    classifier_specs.append(
+                        (
+                            "D3_corrections",
+                            render_prompt(load_prompt_template("D3_corrections"), {"version_text": text}),
+                            version_dir / "D3_corrections.json",
+                            config.llm_retries,
+                        )
+                    )
                 classifier_specs.append(
                     (
-                        "D3_corrections",
-                        render_prompt(load_prompt_template("D3_corrections"), {"version_text": text}),
-                        version_dir / "D3_corrections.json",
+                        "B1_version_summary_sources",
+                        render_prompt(
+                            load_prompt_template("B1_version_summary_sources"),
+                            {
+                                "version_id": version_id,
+                                "source_mentions": brief_mentions_json,
+                            },
+                        ),
+                        version_dir / "B1_version_summary_sources.json",
                         config.llm_retries,
                     )
                 )
-            classifier_specs.append(
-                (
-                    "B1_version_summary_sources",
-                    render_prompt(
-                        load_prompt_template("B1_version_summary_sources"),
-                        {
-                            "version_id": version_id,
-                            "source_mentions": brief_mentions_json,
-                        },
-                    ),
-                    version_dir / "B1_version_summary_sources.json",
-                    config.llm_retries,
-                )
-            )
-            classifier_specs.append(
-                (
-                    "C1_protest_frame_cues",
-                    render_prompt(
-                        load_prompt_template("C1_protest_frame_cues"),
-                        {
-                            "version_id": version_id,
-                            "version_text": text,
-                            "source_mentions": mentions_json,
-                        },
-                    ),
-                    version_dir / "C1_protest_frame_cues.json",
-                    config.llm_retries,
-                )
-            )
-
-            classifier_outputs: Dict[str, Dict[str, Any]] = {}
-            if classifier_specs:
-                classifier_results = client.run_many(classifier_specs)
-                if len(classifier_results) != len(classifier_specs):
-                    raise RuntimeError(
-                        f"Expected {len(classifier_specs)} classifier responses but received {len(classifier_results)}"
+                classifier_specs.append(
+                    (
+                        "C1_protest_frame_cues",
+                        render_prompt(
+                            load_prompt_template("C1_protest_frame_cues"),
+                            {
+                                "version_id": version_id,
+                                "version_text": text,
+                                "source_mentions": mentions_json,
+                            },
+                        ),
+                        version_dir / "C1_protest_frame_cues.json",
+                        config.llm_retries,
                     )
-                classifier_outputs = {
-                    key: prune_low_confidence(result, config.accept_confidence_min)
-                    for (key, _, _, _), result in zip(classifier_specs, classifier_results)
-                }
+                )
 
-            d3 = classifier_outputs.get("D3_corrections", {})
-            b1 = classifier_outputs.get("B1_version_summary_sources", {})
-            c1 = classifier_outputs.get("C1_protest_frame_cues", {})
+                classifier_outputs: Dict[str, Dict[str, Any]] = {}
+                if classifier_specs:
+                    classifier_results = client.run_many(classifier_specs)
+                    if len(classifier_results) != len(classifier_specs):
+                        raise RuntimeError(
+                            f"Expected {len(classifier_specs)} classifier responses but received {len(classifier_results)}"
+                        )
+                    classifier_outputs = {
+                        key: prune_low_confidence(result, config.accept_confidence_min)
+                        for (key, _, _, _), result in zip(classifier_specs, classifier_results)
+                    }
 
-            if d3:
-                version_payloads[version_id]["corrections"] = orjson.dumps(
-                    d3,
+                d3 = classifier_outputs.get("D3_corrections", {})
+                b1 = classifier_outputs.get("B1_version_summary_sources", {})
+                c1 = classifier_outputs.get("C1_protest_frame_cues", {})
+
+                if d3:
+                    version_payloads[version_id]["corrections"] = orjson.dumps(
+                        d3,
+                        option=orjson.OPT_INDENT_2,
+                    ).decode("utf-8")
+                version_payloads[version_id]["protest"] = orjson.dumps(
+                    c1,
                     option=orjson.OPT_INDENT_2,
                 ).decode("utf-8")
-            version_payloads[version_id]["protest"] = orjson.dumps(
-                c1,
-                option=orjson.OPT_INDENT_2,
-            ).decode("utf-8")
-            version_payloads[version_id]["version_summary"] = orjson.dumps(
-                b1,
-                option=orjson.OPT_INDENT_2,
-            ).decode("utf-8")
+                version_payloads[version_id]["version_summary"] = orjson.dumps(
+                    b1,
+                    option=orjson.OPT_INDENT_2,
+                ).decode("utf-8")
 
             token_count = max(len(seg["tokens"]), 1)
             total_attributed_words = max(total_attributed_words, 0)
@@ -895,7 +1535,7 @@ def process_article(
             )
 
         if not version_numeric_metrics:
-            logger.info(
+            logger.debug(
                 "Skipping article %s after processing: no version metrics were generated; likely no usable source mentions",
                 entry_id,
             )
@@ -930,8 +1570,16 @@ def process_article(
 
             pair_prompts = build_pair_prompt_payloads(prev, curr, prev_payload, curr_payload)
 
+            if features_only:
+                desired_keys = [
+                    key for key in ("A3_edit_type_pair", "D5_angle_change_pair", "P10_movement_pair") if key in pair_prompts
+                ]
+            else:
+                desired_keys = list(pair_prompts.keys())
+
             pair_specs: List[Tuple[str, str, Path, int]] = []
-            for key, payload in pair_prompts.items():
+            for key in desired_keys:
+                payload = pair_prompts[key]
                 rendered = render_prompt(load_prompt_template(key), payload)
                 pair_specs.append((key, rendered, pair_dir / f"{key}.json", config.llm_retries))
 
@@ -946,7 +1594,7 @@ def process_article(
                 for (key, _, _, _), result in zip(pair_specs, pair_results)
             }
 
-            movement = results["P10_movement_pair"]
+            movement = results.get("P10_movement_pair", {})
             movement_up = movement.get("movement_summary_upweighted") or ""
             movement_down = movement.get("movement_summary_downweighted") or ""
             movement_confidence = movement.get("confidence")
@@ -959,10 +1607,10 @@ def process_article(
             else:
                 movement_notes = str(movement_notes_parts)
 
-            a3 = results["A3_edit_type_pair"]
+            a3 = results.get("A3_edit_type_pair", {})
             edit_summary = a3.get("summary_of_change", "")
             edit_confidence = a3.get("confidence")
-            d5 = results["D5_angle_change_pair"]
+            d5 = results.get("D5_angle_change_pair", {})
 
             angle_changed_flag = int(bool(d5.get("angle_changed", False)))
             angle_category = d5.get("angle_change_category", "no_change")
@@ -1006,118 +1654,104 @@ def process_article(
                 )
             )
 
-            for src in a3.get("sources_added", []):
-                pair_sources_added.append(
-                    (
-                        entry_id,
-                        news_org,
-                        prev_id,
-                        curr_id,
-                        src.get("surface"),
-                        src.get("canonical"),
-                        src.get("type"),
+            if not features_only:
+                for src in a3.get("sources_added", []):
+                    pair_sources_added.append(
+                        (
+                            entry_id,
+                            news_org,
+                            prev_id,
+                            curr_id,
+                            src.get("surface"),
+                            src.get("canonical"),
+                            src.get("type"),
+                        )
                     )
-                )
-            for src in a3.get("sources_removed", []):
-                pair_sources_removed.append(
-                    (
-                        entry_id,
-                        news_org,
-                        prev_id,
-                        curr_id,
-                        src.get("surface"),
-                        src.get("canonical"),
-                        src.get("type"),
+                for src in a3.get("sources_removed", []):
+                    pair_sources_removed.append(
+                        (
+                            entry_id,
+                            news_org,
+                            prev_id,
+                            curr_id,
+                            src.get("surface"),
+                            src.get("canonical"),
+                            src.get("type"),
+                        )
                     )
-                )
-            for transition in d5.get("source_transitions", []) or []:
-                pair_source_transitions.append(
-                    (
-                        entry_id,
-                        news_org,
-                        prev_id,
-                        curr_id,
-                        transition.get("canonical"),
-                        transition.get("transition_type"),
-                        transition.get("reason_category"),
-                        transition.get("reason_detail"),
+                for transition in d5.get("source_transitions", []) or []:
+                    pair_source_transitions.append(
+                        (
+                            entry_id,
+                            news_org,
+                            prev_id,
+                            curr_id,
+                            transition.get("canonical"),
+                            transition.get("transition_type"),
+                            transition.get("reason_category"),
+                            transition.get("reason_detail"),
+                        )
                     )
-                )
-            for repl in results["P3_anon_named_replacement_pair"].get("replacements", []):
-                pair_replacements.append(
-                    (
-                        entry_id,
-                        news_org,
-                        prev_id,
-                        curr_id,
-                        repl.get("from"),
-                        repl.get("to"),
-                        repl.get("direction"),
-                        repl.get("likelihood", 0.0),
+                for repl in results.get("P3_anon_named_replacement_pair", {}).get("replacements", []):
+                    pair_replacements.append(
+                        (
+                            entry_id,
+                            news_org,
+                            prev_id,
+                            curr_id,
+                            repl.get("from"),
+                            repl.get("to"),
+                            repl.get("direction"),
+                            repl.get("likelihood", 0.0),
+                        )
                     )
-                )
-            for numeric in results["P7_numeric_changes_pair"].get("numeric_changes", []):
-                pair_numeric.append(
-                    (
-                        entry_id,
-                        news_org,
-                        prev_id,
-                        curr_id,
-                        numeric.get("item"),
-                        numeric.get("prev"),
-                        numeric.get("curr"),
-                        numeric.get("delta"),
-                        numeric.get("unit"),
-                        numeric.get("source"),
-                        numeric.get("change_type"),
-                        numeric.get("confidence", 1),
+                for numeric in results.get("P7_numeric_changes_pair", {}).get("numeric_changes", []):
+                    pair_numeric.append(
+                        (
+                            entry_id,
+                            news_org,
+                            prev_id,
+                            curr_id,
+                            numeric.get("item"),
+                            numeric.get("prev"),
+                            numeric.get("curr"),
+                            numeric.get("delta"),
+                            numeric.get("unit"),
+                            numeric.get("source"),
+                            numeric.get("change_type"),
+                            numeric.get("confidence", 1),
+                        )
                     )
-                )
-            for claim in results["P8_claims_pair"].get("claims", []):
-                pair_claims_rows.append(
-                    (
-                        entry_id,
-                        news_org,
-                        prev_id,
-                        curr_id,
-                        claim.get("id"),
-                        claim.get("proposition"),
-                        claim.get("status"),
-                        claim.get("change_note"),
-                        claim.get("confidence", 1),
+                for claim in results.get("P8_claims_pair", {}).get("claims", []):
+                    pair_claims_rows.append(
+                        (
+                            entry_id,
+                            news_org,
+                            prev_id,
+                            curr_id,
+                            claim.get("id"),
+                            claim.get("proposition"),
+                            claim.get("status"),
+                            claim.get("change_note"),
+                            claim.get("confidence", 1),
+                        )
                     )
-                )
-            for cue in results["P9_frame_cues_pair"].get("cues", []):
-                pair_cues_rows.append(
-                    (
-                        entry_id,
-                        news_org,
-                        prev_id,
-                        curr_id,
-                        cue.get("cue"),
-                        int(cue.get("prev", False)),
-                        int(cue.get("curr", False)),
-                        cue.get("direction"),
+                for cue in results.get("P9_frame_cues_pair", {}).get("cues", []):
+                    pair_cues_rows.append(
+                        (
+                            entry_id,
+                            news_org,
+                            prev_id,
+                            curr_id,
+                            cue.get("cue"),
+                            int(cue.get("prev", False)),
+                            int(cue.get("curr", False)),
+                            cue.get("direction"),
+                        )
                     )
-                )
 
         first_version_num = min(version_numeric_metrics.keys())
         final_version_num = max(version_numeric_metrics.keys())
-
-        b2_result = client.run(
-            "B2_first_final_framing_compare",
-            render_prompt(
-                load_prompt_template("B2_first_final_framing_compare"),
-                {
-                    "title_v0": versions[0]["title"],
-                    "lede_v0": ledes.get(first_version_num, {}).get("text", ""),
-                    "title_vf": versions[-1]["title"],
-                    "lede_vf": ledes.get(final_version_num, {}).get("text", ""),
-                },
-            ),
-            article_dir / "B2_first_final_framing_compare.json",
-        )
-        b2_result = prune_low_confidence(b2_result, config.accept_confidence_min)
 
         agg = aggregate_sources_over_versions(source_mentions_by_version, version_meta)
 
@@ -1168,14 +1802,30 @@ def process_article(
             int(live_blog_flag),
         )
 
-        article_metrics_row = (
-            entry_id,
-            news_org,
-            bias.get("overstate_institutional_share", 0.0),
-            distinct_delta,
-            anonymity_delta,
-            hedge_delta,
-        )
+        article_metrics_row: Optional[Tuple[Any, ...]] = None
+        if not features_only:
+            b2_result = client.run(
+                "B2_first_final_framing_compare",
+                render_prompt(
+                    load_prompt_template("B2_first_final_framing_compare"),
+                    {
+                        "title_v0": versions[0]["title"],
+                        "lede_v0": ledes.get(first_version_num, {}).get("text", ""),
+                        "title_vf": versions[-1]["title"],
+                        "lede_vf": ledes.get(final_version_num, {}).get("text", ""),
+                    },
+                ),
+                article_dir / "B2_first_final_framing_compare.json",
+            )
+            b2_result = prune_low_confidence(b2_result, config.accept_confidence_min)
+            article_metrics_row = (
+                entry_id,
+                news_org,
+                bias.get("overstate_institutional_share", 0.0),
+                distinct_delta,
+                anonymity_delta,
+                hedge_delta,
+            )
 
         log_message = f"Processed article {entry_id} ({len(versions)} versions)"
         if verbose:

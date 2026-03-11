@@ -215,6 +215,19 @@ def insert_pair_cues(writer: OutputWriter, rows: Rows) -> None:
     )
 
 
+def insert_pair_edit_actions(writer: OutputWriter, rows: Rows) -> None:
+    writer.executemany(
+        """
+        INSERT INTO pair_edit_actions (
+            article_id, news_org, from_version_id, to_version_id,
+            from_version_num, to_version_num, pair_policy,
+            editor_request, writer_action, content_added, content_removed, content_changed
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        list(rows),
+    )
+
+
 def upsert_article_metrics(writer: OutputWriter, row: Tuple[Any, ...]) -> None:
     writer.execute(
         """
